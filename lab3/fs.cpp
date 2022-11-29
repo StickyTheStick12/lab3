@@ -1,21 +1,20 @@
 #include <iostream>
 #include <algorithm>
+#include <iomanip>
 #include "fs.h"
 
 //TODO:
+// WRITECHAR
+// CAT
+//
+
+
+//TODO:
 // Fix numbers
-// format:
-// Check for correct values
-// --
-// cat
-// --
-// create:
-// incorporate file creation check
 // --
 
 
 FatEntry FAT[1024];
-Block buffer;
 DirBlock currentDir;
 
 
@@ -33,36 +32,36 @@ FS::~FS()
 int
 FS::format()
 {
-    //Remove all data from virtdisk
-    std::fill(std::begin(buffer.data), std::end(buffer.data), 0);
+    Datablock buffer;
+    //create a datablock and fill with zero
+    std::fill(std::begin(buffer), std::end(buffer), 0);
 
-    for(int i = 0; i < 1024; ++i)
-    {
+    //We will overwrite the whole disk with this block to reset anything that is left
+    for(int i = 0; i < 1024; ++i) //Change this to how many block we want
         disk.write(i, (uint8_t*)&buffer);
-    }
+
 
     //create a new rootDir
-    Block rootDir;
+    DirBlock rootDir;
 
     //fill rootDir with zero
-    std::fill(std::begin(rootDir.data), std::end(rootDir.data), 0);
-    rootDir.dir.isdir = true;
-    rootDir.dir.nextEntry = 0;
+    rootDir.isdir = true;
 
     //write rootDir
-    buffer = rootDir;
-    disk.write(0, (uint8_t*)&buffer);
+    disk.write(0, (uint8_t*)&rootDir);
+
+    //save rootDir as our current dir
+    currentDir = rootDir;
 
     //set all fat entries to free
     std::fill(std::begin(FAT), std::end(FAT), FAT_FREE);
 
-    FAT[0] = FAT_EOF;
-    FAT[1] = FAT_EOF;
+    FAT[0] = ROOT_BLOCK;
+    FAT[1] = FAT_BLOCK;
 
     //save fat
     SaveFat();
 
-    std::cout << "FS::format()\n";
     return 0;
 }
 
@@ -71,6 +70,13 @@ FS::format()
 int
 FS::create(std::string filepath)
 {
+    // check for file errors
+    if(!CheckFileCreation(filepath))
+    {
+        std::cout << "Couldn't create this file. An error with the filename occured";
+        return -1;
+    }
+
     //allocate a file
     File file;
     file.pos = 0;
@@ -80,29 +86,31 @@ FS::create(std::string filepath)
 
     dir_entry newEntry;
     newEntry.size = 0;
-    newEntry.type = 0;
+    newEntry.type = TYPE_FILE;
     newEntry.first_blk = index;
     std::copy(std::begin(filepath), std::end(filepath), newEntry.file_name);
 
     //save to directory
     FAT[index] = FAT_EOF;
 
+    //save the fat
     SaveFat();
 
-    //read chars and put them into the buffer
     std::string str;
 
+    //Continue to read forever
     while(getline(std::cin, str))
     {
+        //if string is empty we will save the file
         if(str.empty())
             break;
+        //otherwise send one char to writechar
         for(int i = 0; i < str.size(); ++i)
         {
             WriteChar(file, str[i]);
         }
     }
 
-    std::cout << "FS::create(" << filepath << ")\n";
     return 0;
 }
 
@@ -127,15 +135,20 @@ FS::cat(std::string filepath)
 int
 FS::ls()
 {
-    for(int i = 0; i < 128; ++i) //max files in a directory
+    std::cout.fill(' ');
+    std::cout << std::setw(30) << std::left << "Filename:";
+    std::cout << "Size:" << std::endl;
+
+    for(int i = 0; i < 1024; ++i) //max files in a directory
     {
+        //check if entry in entris is used i.e. that something exists in that position
         if(currentDir.entries[i].isUsed)
         {
-            std::cout << currentDir.entries[i].file_name << "       " << currentDir.entries[i].size << std::endl;
+            std::cout << std::setw(30) << std::left << currentDir.entries[i].file_name;
+            std::cout << currentDir.entries[i].size << std::endl;
         }
     }
 
-    std::cout << "FS::ls()\n";
     return 0;
 }
 

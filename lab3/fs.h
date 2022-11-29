@@ -33,7 +33,6 @@ struct dir_entry{
 struct DirBlock
 {
     bool isdir;
-    int nextEntry;
     dir_entry entries [1024]; // change this
 };
 
@@ -50,7 +49,6 @@ struct File
     char mode[3];
     Block buffer[1024];
     dir_entry dirEntry;
-    FatEntry fatBlock;
 };
 
 class FS {
@@ -98,11 +96,17 @@ public:
     int chmod(std::string accessrights, std::string filepath);
 
 private:
-    bool CheckFileCreation(const std::string& filename);
-    int GetUnusedBlock();
+    //#-----FAT FUNCTIONS-----#
     void SaveFat();
+    int GetUnusedBlock();
     void LoadFat();
+
+    //#-----FILE FUNCTIONS-----#
+    bool CheckFileCreation(const std::string& filename);
+    int FindFile(const std::string filename);
     void WriteChar(File& file, char a);
+
+
     DirBlock* FindDirectory(const std::string path, std::string filename);
 };
 
