@@ -1,0 +1,36 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/mnt/c/Users/pc1admin/CLionProjects/lab3/disk.h
+iostream
+-
+fstream
+-
+
+/mnt/c/Users/pc1admin/CLionProjects/lab3/fs.h
+iostream
+-
+cstdint
+-
+disk.h
+/mnt/c/Users/pc1admin/CLionProjects/lab3/disk.h
+
+/mnt/c/Users/pc1admin/CLionProjects/lab3/main.cpp
+shell.h
+/mnt/c/Users/pc1admin/CLionProjects/lab3/shell.h
+fs.h
+/mnt/c/Users/pc1admin/CLionProjects/lab3/fs.h
+disk.h
+/mnt/c/Users/pc1admin/CLionProjects/lab3/disk.h
+
+/mnt/c/Users/pc1admin/CLionProjects/lab3/shell.h
+iostream
+-
+fs.h
+/mnt/c/Users/pc1admin/CLionProjects/lab3/fs.h
+
