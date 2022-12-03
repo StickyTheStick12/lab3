@@ -17,9 +17,8 @@
 #define EXECUTE 0x01
 
 typedef short FatEntry;
-typedef FatEntry FatBlock [1024];
 
-typedef char Datablock[1024];
+typedef char Datablock[4096];
 
 struct dir_entry{
     char file_name[56]; // name of the file / sub-directory
@@ -32,22 +31,15 @@ struct dir_entry{
 
 struct DirBlock
 {
-    bool isdir;
     dir_entry entries [1024]; // change this
 };
 
-struct Block
-{
-    DirBlock dir;
-    Datablock data;
-    FatBlock fat;
-};
 
 struct File
 {
     int pos;
     char mode[3];
-    Block buffer[1024];
+    Datablock buffer;
     dir_entry dirEntry;
 };
 
@@ -64,7 +56,7 @@ public:
     int format();
     // create <filepath> creates a new file on the disk, the data content is
     // written on the following rows (ended with an empty row)
-    int create(std::string filepath);
+    int create(const std::string& filepath);
     // cat <filepath> reads the content of a file and prints it on the screen
     int cat(std::string filepath);
     // ls lists the content in the current directory (files and sub-directories)
@@ -77,7 +69,7 @@ public:
     // or moves the file <sourcepath> to the directory <destpath> (if dest is a directory)
     int mv(std::string sourcepath, std::string destpath);
     // rm <filepath> removes / deletes the file <filepath>
-    int rm(std::string filepath);
+    int rm(const std::string& filepath);
     // append <filepath1> <filepath2> appends the contents of file <filepath1> to
     // the end of file <filepath2>. The file <filepath1> is unchanged.
     int append(std::string filepath1, std::string filepath2);
@@ -99,15 +91,19 @@ private:
     //#-----FAT FUNCTIONS-----#
     void SaveFat();
     int GetUnusedBlock();
-    void LoadFat();
 
     //#-----FILE FUNCTIONS-----#
     bool CheckFileCreation(const std::string& filename);
-    int FindFile(const std::string filename);
+    int FindFile(const std::string& filename);
     void WriteChar(File& file, char a);
+    File* FOpen();
+    void FClose();
+    bool IsOpen();
 
-
-    DirBlock* FindDirectory(const std::string path, std::string filename);
+    //#-----DIRECTORY FUNCTIONS-----#
+    int FindFreeDirPlace(DirBlock& dir);
+    int FindDirectory(const std::string& dir);
+    void InitDir(DirBlock& dir);
 };
 
 #endif // __FS_H__
