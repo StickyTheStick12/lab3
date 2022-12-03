@@ -3,10 +3,11 @@
 #include <cstring>
 #include "fs.h"
 
+//mv can rename a file to an already existing filename
+//pwd doesnt remove anything so when we cd to a new directory we get //dir instead of /dir and when we go back we get //dir/..
+
 //TODO:
-// MKDIR
 // APPEND
-// CD
 // PWD
 
 //TODO:
@@ -581,7 +582,7 @@ FS::cd(std::string dirpath)
     }
 
     //otherwise load
-    disk.read(FAT[currentDir.entries[dirIndex].first_blk], (uint8_t*)currentDir.entries);
+    disk.read(currentDir.entries[dirIndex].first_blk, (uint8_t*)currentDir.entries);
 
     //add to our current string
     if(strcmp(currentDir.entries[dirIndex].file_name, "..") == 0)
@@ -591,7 +592,6 @@ FS::cd(std::string dirpath)
     }
     else
     {
-        currDirStr += "/";
         currDirStr += dirpath;
     }
 

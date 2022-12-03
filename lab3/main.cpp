@@ -7,9 +7,7 @@ main(int argc, char **argv)
 {
     FS filesystem;
 
-    filesystem.format();
-
-    //Shell shell;
-    //shell.run();
+    Shell shell;
+    shell.run();
     return 0;
 }

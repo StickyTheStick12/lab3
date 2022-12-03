@@ -97,6 +97,12 @@
 		<Unit filename="/home/kevin/CLionProjects/lab3/lab3/main.cpp">
 			<Option target="lab3"/>
 		</Unit>
+		<Unit filename="/home/kevin/CLionProjects/lab3/lab3/shell.cpp">
+			<Option target="lab3"/>
+		</Unit>
+		<Unit filename="/home/kevin/CLionProjects/lab3/lab3/shell.h">
+			<Option target="lab3"/>
+		</Unit>
 		<Unit filename="/home/kevin/CLionProjects/lab3/lab3/CMakeLists.txt">
 			<Option virtualFolder="CMake Files\"/>
 		</Unit>
