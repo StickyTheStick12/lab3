@@ -47,7 +47,7 @@ class FS {
 private:
     Disk disk;
     // size of a FAT entry is 2 bytes
-    int16_t fat[BLOCK_SIZE/2];
+    int16_t FAT[BLOCK_SIZE/2];
 
 public:
     FS();

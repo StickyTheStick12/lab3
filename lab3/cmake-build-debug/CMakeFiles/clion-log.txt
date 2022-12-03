@@ -1,8 +1,0 @@
-C:\WINDOWS\system32\wsl.exe --distribution Ubuntu --exec /bin/bash -c "export CMAKE_COLOR_DIAGNOSTICS=ON && export CLION_IDE=TRUE && export JETBRAINS_IDE=TRUE && cd /mnt/c/Users/pc1admin/CLionProjects/lab3/cmake-build-debug && /usr/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G 'CodeBlocks - Unix Makefiles' -S /mnt/c/Users/pc1admin/CLionProjects/lab3 -B /mnt/c/Users/pc1admin/CLionProjects/lab3/cmake-build-debug"
--- Configuring done
-CMake Error at CMakeLists.txt:6 (add_executable):
-  CXX_STANDARD is set to invalid value '23'
-
-
--- Generating done
-CMake Generate step failed.  Build files cannot be regenerated correctly.

@@ -25,8 +25,6 @@
 //TODO:
 // Fix numbers
 
-
-FatEntry FAT[1024];
 DirBlock currentDir;
 
 //when we change directory we will add to this otherwise we can save a name in the dirblock
