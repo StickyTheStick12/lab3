@@ -16,8 +16,6 @@
 #define WRITE 0x02
 #define EXECUTE 0x01
 
-typedef short FatEntry;
-
 typedef char Datablock[4096];
 
 struct dir_entry{
@@ -26,12 +24,11 @@ struct dir_entry{
     uint16_t first_blk; // index in the FAT for the first block of the file
     uint8_t type; // directory (1) or file (0)
     uint8_t access_rights; // read (0x04), write (0x02), execute (0x01)
-    bool isUsed;
 };
 
 struct DirBlock
 {
-    dir_entry entries [1024]; // change this
+    dir_entry entries[64]; // change this
 };
 
 
@@ -95,7 +92,6 @@ private:
     //#-----FILE FUNCTIONS-----#
     bool CheckFileCreation(const std::string& filename);
     int FindFile(const std::string& filename);
-    void WriteChar(File& file, char a);
     File* FOpen();
     void FClose();
     bool IsOpen();

@@ -23,9 +23,6 @@
 // pwd
 
 
-//TODO:
-// Fix numbers
-
 DirBlock currentDir;
 
 //when we change directory we will add to this otherwise we can save a name in the dirblock
@@ -52,7 +49,7 @@ FS::format()
     std::fill(std::begin(buffer), std::end(buffer), 0);
 
     //We will overwrite the whole disk with this block to reset anything that is left
-    for(int i = 0; i < 1024; ++i) //Change this to how many block we want
+    for(int i = 0; i < 2048; ++i)
         disk.write(i, (uint8_t*)&buffer);
 
     //create a new rootDir
@@ -116,7 +113,7 @@ FS::create(const std::string& filepath)
     file.dirEntry.first_blk = fatIndex;
     std::copy(std::begin(filepath), std::end(filepath), file.dirEntry.file_name);
     file.dirEntry.file_name[filepath.size()] = '\0';
-    file.dirEntry.isUsed = true;
+    file.dirEntry.access_rights = 1;
 
     std::fill(std::begin(file.buffer), std::end(file.buffer), 0);
 
@@ -136,19 +133,13 @@ FS::create(const std::string& filepath)
         //if string is empty we will save the file
         if(str.empty())
             break;
-        //otherwise send one char to writechar
         for(int i = 0; i < str.size(); ++i)
         {
-            file.buffer[file.pos] = str[i];
-            file.pos++;
-            file.dirEntry.size += sizeof(char);
-
             //if memory becomes full
-            if(file.pos == 1023)
+            if(file.pos == 1024)
             {
-                file.buffer[file.pos++] = '\0';
-                disk.write(writePos, (uint8_t*)&file.buffer);
                 //write to disk
+                disk.write(writePos, (uint8_t*)&file.buffer);
 
                 int indexNextBlock = GetUnusedBlock();
                 FAT[writePos] = indexNextBlock;
@@ -157,15 +148,19 @@ FS::create(const std::string& filepath)
                 file.pos = 0;
                 writePos = indexNextBlock;
             }
+
+            file.buffer[file.pos] = str[i];
+            file.pos++;
+            file.dirEntry.size += sizeof(char);
         }
     }
 
-    if((file.dirEntry.size % 1023) > 0)
-    {
-        //if the size is not a multiple of 1024 it have not been written to disk
+    //check if we need to null terminate
+    if((file.dirEntry.size % 1024) > 0)
         file.buffer[file.pos++] = '\0';
-        disk.write(writePos, (uint8_t*)file.buffer);
-    }
+
+    //write last block to disk
+    disk.write(writePos, (uint8_t*)file.buffer);
 
     //save direntry to the directory
     currentDir.entries[dirIndex] = file.dirEntry;
@@ -187,10 +182,8 @@ FS::cat(std::string filepath)
     }
 
     //allocate a new FatEntry
-    FatEntry fatIndex = currentDir.entries[fileIndex].first_blk;
+    int16_t fatIndex = currentDir.entries[fileIndex].first_blk;
     Datablock buffer;
-
-    //fetch the first block for the file
 
     do
     {
@@ -198,16 +191,15 @@ FS::cat(std::string filepath)
         disk.read(fatIndex, (uint8_t*)buffer);
 
         //print the content
-        for(int i = 0; i < 1024/4; ++i)
-        {
-            std::cout << buffer[i];
-        }
+        //because we have a null terminated char arr we can just print it
+        std::cout << buffer;
 
         //fetch next fat block
         fatIndex = FAT[fatIndex];
     }
     while(fatIndex != -1);    //check if the fat points to anymore data
 
+    //end the line
     std::cout << std::endl;
 
     return 0;
@@ -222,18 +214,22 @@ FS::ls()
     std::cout << std::setw(30) << std::left << "type:";
     std::cout << "Size:" << std::endl;
 
-    for(int i = 0; i < 1024; ++i) //max files in a directory
+    for(int i = 0; i < 64; ++i) //max files in a directory
     {
         //check if entry in entris is used i.e. that something exists in that position
-        if(currentDir.entries[i].isUsed)
+        if(currentDir.entries[i].access_rights != 0)
         {
             std::cout << std::setw(30) << std::left << currentDir.entries[i].file_name;
-            if(currentDir.entries[i].type == TYPE_DIR)
-                std::cout << std::setw(30) << std::left << "Dir";
-            else
+            if(currentDir.entries[i].type == TYPE_FILE)
+            {
                 std::cout << std::setw(30) << std::left << "File";
-
-            std::cout << currentDir.entries[i].size << std::endl;
+                std::cout << currentDir.entries[i].size << std::endl;
+            }
+            else
+            {
+                std::cout << std::setw(30) << std::left << "Dir";
+                std::cout << "-" << std::endl;
+            }
         }
     }
 
@@ -293,7 +289,7 @@ FS::cp(std::string sourcepath, std::string destpath)
     file.dirEntry.size = currentDir.entries[sourceFileIndex].size;
     file.dirEntry.type = TYPE_FILE;
     file.dirEntry.first_blk = fatIndexNewFile;
-    file.dirEntry.isUsed = true;
+    file.dirEntry.access_rights = 1;
 
     //save dirEntry to dir
     currentDir.entries[dirIndex] = file.dirEntry;
@@ -352,6 +348,7 @@ FS::mv(std::string sourcepath, std::string destpath)
     if(CheckFileCreation(destpath))
     {
         strcpy(currentDir.entries[fileIndex].file_name, destpath.c_str());
+        disk.write(0, (uint8_t*)currentDir.entries);
     }
 
     return 0;
@@ -361,8 +358,6 @@ FS::mv(std::string sourcepath, std::string destpath)
 int
 FS::rm(const std::string& filepath)
 {
-    //We cant remove it from disk without overwriting it which is unnecessary.
-
     //first check if filepath exists
 
     int fileIndex = FindFile(filepath);
@@ -374,12 +369,12 @@ FS::rm(const std::string& filepath)
     }
 
     //delete from direntries
-    currentDir.entries[fileIndex].isUsed = false;
+    currentDir.entries[fileIndex].access_rights = 0;
     int nextIndex = fileIndex;
-
+    //TODO: fix this
     do
     {
-        nextIndex = FAT[currentDir.entries[fileIndex].first_blk];
+        nextIndex = FAT[currentDir.entries[nextIndex].first_blk];
         FAT[currentDir.entries[fileIndex].first_blk] = FAT_EOF;
 
         fileIndex = nextIndex;
@@ -541,7 +536,7 @@ FS::mkdir(std::string dirpath)
     std::copy(std::begin(dirpath), std::end(dirpath), nEntry.file_name);
     nEntry.file_name[dirpath.size()] = '\0';
     nEntry.first_blk = freeFat;
-    nEntry.isUsed = true;
+    nEntry.access_rights = 1;
 
     //add to current directory
     currentDir.entries[fDir] = nEntry;
@@ -621,7 +616,7 @@ FS::chmod(std::string accessrights, std::string filepath)
 
 int FS::GetUnusedBlock()
 {
-    for(int i = 2; i < 1024; ++i)
+    for(int i = 2; i < BLOCK_SIZE/2; ++i)
     {
         if(FAT[i] == FAT_FREE)
             return i;
@@ -633,34 +628,13 @@ void FS::SaveFat()
     disk.write(1, (uint8_t*)&FAT);
 }
 
-void FS::WriteChar(File& file, char a)
-{
-    file.buffer[file.pos] = a;
-    file.pos++;
-    file.dirEntry.size += sizeof(char);
-    int writePos = file.dirEntry.first_blk;
-
-    //if memory becomes full
-    if(file.pos == 1024)
-    {
-        disk.write(writePos, (uint8_t*)&file.buffer);
-        //write to disk
-
-        int indexNextBlock = GetUnusedBlock();
-        FAT[file.dirEntry.first_blk] = indexNextBlock;
-        FAT[indexNextBlock] = FAT_EOF;
-        SaveFat();
-        file.pos = 0;
-    }
-}
-
 int FS::FindFreeDirPlace(DirBlock& dir)
 {
     //loop through all entries
-    for(int i = 0; i < 1024; ++i)
+    for(int i = 0; i < 64; ++i)
     {
         //check if entry is used
-        if(!dir.entries[i].isUsed)
+        if(dir.entries[i].access_rights == 0)
             return i;
     }
 
@@ -675,11 +649,11 @@ bool FS::CheckFileCreation(const std::string& filename)
         return false;
 
     //second check that it doesn't exist
-    for(int i = 0; i < 1024; ++i) //max amount of files in a directory
+    for(int i = 0; i < 64; ++i) //max amount of files in a directory
     {
         for (int j = 0; j < 56; ++j)
         {
-            if(currentDir.entries[i].file_name[j] != filename[j])
+            if(currentDir.entries[i].file_name[j] != filename[j]) //TODO: dont compare char arr with string
                 break;
         }
     }
@@ -689,9 +663,9 @@ bool FS::CheckFileCreation(const std::string& filename)
 
 int FS::FindFile(const std::string& filename)
 {
-    for(int i = 0; i < 1024; ++i)
+    for(int i = 0; i < 64; ++i)
     {
-        if(currentDir.entries[i].isUsed && currentDir.entries[i].type == TYPE_FILE)
+        if(currentDir.entries[i].access_rights != 0 && currentDir.entries[i].type == TYPE_FILE)
         {
             if(strcmp(currentDir.entries[i].file_name, filename.c_str()) == 0)
             {
@@ -703,9 +677,9 @@ int FS::FindFile(const std::string& filename)
 
 int FS::FindDirectory(const std::string& dir)
 {
-    for(int i = 0; i < 1024; ++i)
+    for(int i = 0; i < 64; ++i)
     {
-        if(currentDir.entries[i].isUsed && currentDir.entries[i].type != TYPE_DIR)
+        if(currentDir.entries[i].access_rights != 0 && currentDir.entries[i].type == TYPE_DIR)
         {
             int j = 0;
             for(j; j < 54; ++j)
@@ -724,9 +698,9 @@ int FS::FindDirectory(const std::string& dir)
 
 void FS::InitDir(DirBlock &dir)
 {
-    for(int i = 0; i < 1024; ++i)
+    for(int i = 0; i < 64; ++i)
     {
-        dir.entries[i].isUsed = false;
+        dir.entries[i].access_rights = 0;
     }
 }
 
