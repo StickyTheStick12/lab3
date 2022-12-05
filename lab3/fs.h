@@ -56,34 +56,34 @@ public:
     // written on the following rows (ended with an empty row)
     int create(const std::string& filepath);
     // cat <filepath> reads the content of a file and prints it on the screen
-    int cat(std::string filepath);
+    int cat(const std::string& filepath);
     // ls lists the content in the current directory (files and sub-directories)
     int ls();
 
     // cp <sourcepath> <destpath> makes an exact copy of the file
     // <sourcepath> to a new file <destpath>
-    int cp(std::string sourcepath, std::string destpath);
+    int cp(const std::string& sourcepath, const std::string& destpath);
     // mv <sourcepath> <destpath> renames the file <sourcepath> to the name <destpath>,
     // or moves the file <sourcepath> to the directory <destpath> (if dest is a directory)
-    int mv(std::string sourcepath, std::string destpath);
+    int mv(const std::string& sourcepath, const std::string& destpath);
     // rm <filepath> removes / deletes the file <filepath>
     int rm(const std::string& filepath);
     // append <filepath1> <filepath2> appends the contents of file <filepath1> to
     // the end of file <filepath2>. The file <filepath1> is unchanged.
-    int append(std::string filepath1, std::string filepath2);
+    int append(const std::string& filepath1, const std::string& filepath2);
 
     // mkdir <dirpath> creates a new sub-directory with the name <dirpath>
     // in the current directory
-    int mkdir(std::string dirpath);
+    int mkdir(const std::string& dirpath);
     // cd <dirpath> changes the current (working) directory to the directory named <dirpath>
-    int cd(std::string dirpath);
+    int cd(const std::string& dirpath);
     // pwd prints the full path, i.e., from the root directory, to the current
     // directory, including the current directory name
     int pwd();
 
     // chmod <accessrights> <filepath> changes the access rights for the
     // file <filepath> to <accessrights>.
-    int chmod(std::string accessrights, std::string filepath);
+    int chmod(const std::string& accessrights, const std::string& filepath);
 
 private:
     //#-----FAT FUNCTIONS-----#
@@ -93,9 +93,6 @@ private:
     //#-----FILE FUNCTIONS-----#
     bool CheckFileCreation(const std::string& filename);
     int FindFile(const std::string& filename);
-    File* FOpen();
-    void FClose();
-    bool IsOpen();
 
     //#-----DIRECTORY FUNCTIONS-----#
     int FindFreeDirPlace(DirBlock& dir);

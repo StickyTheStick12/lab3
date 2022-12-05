@@ -5,7 +5,6 @@
 
 //TODO:
 // APPEND
-// chmod
 
 //TODO:
 // aboslute/relative path
@@ -13,7 +12,7 @@
 // append
 // mkdir
 // cd
-// pwd
+
 
 std::string currDirStr = "/";
 DirBlock currentDir;
@@ -71,6 +70,11 @@ FS::format()
 int
 FS::create(const std::string& filepath)
 {
+    if(filepath)
+    {
+
+    }
+
     // check for file errors
     if(!CheckFileCreation(filepath))
     {
@@ -104,7 +108,7 @@ FS::create(const std::string& filepath)
     file.dirEntry.first_blk = fatIndex;
     std::copy(std::begin(filepath), std::end(filepath), file.dirEntry.file_name);
     file.dirEntry.file_name[filepath.size()] = '\0';
-    file.dirEntry.access_rights = 1;
+    file.dirEntry.access_rights = 7;
 
     std::fill(std::begin(file.buffer), std::end(file.buffer), 0);
 
@@ -161,8 +165,10 @@ FS::create(const std::string& filepath)
 
 // cat <filepath> reads the content of a file and prints it on the screen
 int
-FS::cat(std::string filepath)
+FS::cat(const std::string& filepath)
 {
+    //check that we have permissions
+
     //check that file actually exists
     int fileIndex = FindFile(filepath);
 
@@ -171,6 +177,13 @@ FS::cat(std::string filepath)
         std::cout << "couldn't find file, it probably doesn't exists in this directory" << std::endl;
         return -1;
     }
+
+
+    if(currentDir.entries[fileIndex].access_rights < 4)
+    {
+        return -2;
+    }
+
 
     //allocate a new FatEntry
     int16_t fatIndex = currentDir.entries[fileIndex].first_blk;
@@ -202,7 +215,8 @@ FS::ls()
 {
     std::cout.fill(' ');
     std::cout << std::setw(30) << std::left << "Filename:";
-    std::cout << std::setw(30) << std::left << "type:";
+    std::cout << std::setw(30) << std::left << "Type:";
+    std::cout << std::setw(30) << std::left << "Accessrights:";
     std::cout << "Size:" << std::endl;
 
     for(int i = 0; i < 64; ++i) //max files in a directory
@@ -211,14 +225,43 @@ FS::ls()
         if(currentDir.entries[i].access_rights != 0)
         {
             std::cout << std::setw(30) << std::left << currentDir.entries[i].file_name;
+            int temp = currentDir.entries[i].access_rights;
+
+            std::string str = "";
+
+            if(temp >= 4)
+            {
+                str += "r";
+                temp -= 4;
+            }
+            else
+                str += "-";
+
+
+            if(temp >= 2)
+            {
+                str += "w";
+                temp -= 2;
+
+            }
+            else
+                str += "-";
+
+            if(temp == 1)
+                str += "x";
+            else
+                str += "-";
+
             if(currentDir.entries[i].type == TYPE_FILE)
             {
                 std::cout << std::setw(30) << std::left << "File";
+                std::cout << std::setw(30) << std::left << str;
                 std::cout << currentDir.entries[i].size << std::endl;
             }
             else
             {
                 std::cout << std::setw(30) << std::left << "Dir";
+                std::cout << std::setw(30) << std::left << str;
                 std::cout << "-" << std::endl;
             }
         }
@@ -230,7 +273,7 @@ FS::ls()
 // cp <sourcepath> <destpath> makes an exact copy of the file
 // <sourcepath> to a new file <destpath>
 int
-FS::cp(std::string sourcepath, std::string destpath)
+FS::cp(const std::string& sourcepath, const std::string& destpath)
 {
     //begin with checking if destpath exists
     if(!CheckFileCreation(destpath))
@@ -268,6 +311,11 @@ FS::cp(std::string sourcepath, std::string destpath)
         return -1;
     }
 
+    int temp = currentDir.entries[sourceFileIndex].access_rights;
+
+    if(temp == 4 || temp == 5 || temp == 1)
+        return -1;
+
     //allocate a file
     File file;
     file.pos = 0;
@@ -281,7 +329,7 @@ FS::cp(std::string sourcepath, std::string destpath)
     file.dirEntry.size = currentDir.entries[sourceFileIndex].size;
     file.dirEntry.type = TYPE_FILE;
     file.dirEntry.first_blk = fatIndexNewFile;
-    file.dirEntry.access_rights = 1;
+    file.dirEntry.access_rights = temp;
 
     //save dirEntry to dir
     currentDir.entries[dirIndex] = file.dirEntry;
@@ -326,7 +374,7 @@ FS::cp(std::string sourcepath, std::string destpath)
 // mv <sourcepath> <destpath> renames the file <sourcepath> to the name <destpath>,
 // or moves the file <sourcepath> to the directory <destpath> (if dest is a directory)
 int
-FS::mv(std::string sourcepath, std::string destpath)
+FS::mv(const std::string& sourcepath, const std::string& destpath)
 {
     //check if sourepath exists
     int fileIndex = FindFile(sourcepath);
@@ -353,7 +401,6 @@ int
 FS::rm(const std::string& filepath)
 {
     //we will first test if a file exists with this filename
-
     std::pair<int,int> rmPair = FindRm(filepath);
 
     //check if it was found
@@ -400,7 +447,7 @@ FS::rm(const std::string& filepath)
 // append <filepath1> <filepath2> appends the contents of file <filepath1> to
 // the end of file <filepath2>. The file <filepath1> is unchanged.
 int
-FS::append(std::string filepath1, std::string filepath2)
+FS::append(const std::string& filepath1, const std::string& filepath2)
 {
     int copyFrom = FindFile(filepath1);
     int writeTo = FindFile(filepath2);
@@ -454,12 +501,6 @@ FS::append(std::string filepath1, std::string filepath2)
 
             //write buffer to disk
             disk.write(fFat, (uint8_t*)buffer);
-
-            FAT[index] = fFat;
-
-            FAT[fFat] = FAT_EOF;
-
-            index = fFat;
 
             indexCopy = FAT[indexCopy];
         }
@@ -528,7 +569,7 @@ FS::append(std::string filepath1, std::string filepath2)
 // mkdir <dirpath> creates a new sub-directory with the name <dirpath>
 // in the current directory
 int
-FS::mkdir(std::string dirpath)
+FS::mkdir(const std::string& dirpath)
 {
     if(!CheckFileCreation(dirpath))
     {
@@ -564,7 +605,7 @@ FS::mkdir(std::string dirpath)
     std::copy(std::begin(dirpath), std::end(dirpath), nEntry.file_name);
     nEntry.file_name[dirpath.size()] = '\0';
     nEntry.first_blk = freeFat;
-    nEntry.access_rights = 1;
+    nEntry.access_rights = 6;
 
     //add to current directory
     currentDir.entries[fDir] = nEntry;
@@ -591,10 +632,8 @@ FS::mkdir(std::string dirpath)
 
 // cd <dirpath> changes the current (working) directory to the directory named <dirpath>
 int
-FS::cd(std::string dirpath)
+FS::cd(const std::string& dirpath)
 {
-    // begin with one level
-
     // first we will look for dirpath
     int dirIndex = FindDirectory(dirpath);
 
@@ -644,11 +683,18 @@ FS::pwd()
 // chmod <accessrights> <filepath> changes the access rights for the
 // file <filepath> to <accessrights>.
 int
-FS::chmod(std::string accessrights, std::string filepath)
+FS::chmod(const std::string& accessrights, const std::string& filepath)
 {
-    //check if accessright is odd, if it is then we know that we can subtract
 
-    std::cout << "FS::chmod(" << accessrights << "," << filepath << ")\n";
+    std::pair<int, int> filePair = FindRm(filepath);
+
+    if(filePair.first == -1)
+        return -1;
+
+    currentDir.entries[filePair.first].access_rights = stoi(accessrights);
+
+    disk.write(currentDir.blockNo, (uint8_t*)currentDir.entries);
+
     return 0;
 }
 
