@@ -29,6 +29,7 @@ struct dir_entry{
 struct DirBlock
 {
     dir_entry entries[64]; // change this
+    int16_t blockNo;
 };
 
 
@@ -100,6 +101,8 @@ private:
     int FindFreeDirPlace(DirBlock& dir);
     int FindDirectory(const std::string& dir);
     void InitDir(DirBlock& dir);
+
+    std::pair<int,int> FindRm(const std::string& filepath);
 };
 
 #endif // __FS_H__

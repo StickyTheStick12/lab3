@@ -3,16 +3,9 @@
 #include <cstring>
 #include "fs.h"
 
-//mv can rename a file to an already existing filename
-//pwd doesnt remove anything so when we cd to a new directory we get //dir instead of /dir and when we go back we get //dir/..
-
 //TODO:
 // APPEND
-// PWD
-
-//TODO:
-// append
-// rm with directories
+// chmod
 
 //TODO:
 // aboslute/relative path
@@ -22,13 +15,10 @@
 // cd
 // pwd
 
-
+std::string currDirStr = "/";
 DirBlock currentDir;
 
 //when we change directory we will add to this otherwise we can save a name in the dirblock
-std::string currDirStr = "/";
-//change this to a list for easy removal?
-
 
 FS::FS()
 {
@@ -62,6 +52,7 @@ FS::format()
 
     //save rootDir as our current dir
     currentDir = rootDir;
+    currentDir.blockNo = 0;
 
     //set all fat entries to free
     std::fill(std::begin(FAT), std::end(FAT), FAT_FREE);
@@ -361,28 +352,47 @@ FS::mv(std::string sourcepath, std::string destpath)
 int
 FS::rm(const std::string& filepath)
 {
-    //first check if filepath exists
+    //we will first test if a file exists with this filename
 
-    int fileIndex = FindFile(filepath);
+    std::pair<int,int> rmPair = FindRm(filepath);
 
-    if(fileIndex == -1)
+    //check if it was found
+    if(rmPair.first == -1)
+        return -2;
+
+    //check if it was a directory and if that is true check if that directory is empty
+    if(rmPair.second == TYPE_DIR)
     {
-        std::cout << "couldn't remove this file. It probably doesn't exists" << std::endl;
-        return -1;
+        DirBlock temp;
+
+        disk.read(currentDir.entries[rmPair.first].first_blk, (uint8_t*)temp.entries);
+
+        //this should never happen that we need to check for this because it should always contain this in the first spot
+        //if(strcmp("..", temp.entries[0].file_name) != 0)
+        //{
+        //    return -1;
+        //}
+
+        for(int i = 1; i < 64; ++i)
+        {
+            if(temp.entries[i].access_rights != 0)
+                return -1;
+        }
     }
 
     //delete from direntries
-    currentDir.entries[fileIndex].access_rights = 0;
+    currentDir.entries[rmPair.first].access_rights = 0;
 
-    fileIndex = currentDir.entries[fileIndex].first_blk;
+    int fIndex = currentDir.entries[rmPair.first].first_blk;
 
-    do
+    while(fIndex != -1)
     {
-        int nextIndex = FAT[fileIndex];
-        FAT[fileIndex] = FAT_EOF;
-        fileIndex = nextIndex;
+        int nextIndex = FAT[fIndex];
+        FAT[fIndex] = FAT_EOF;
+        fIndex = nextIndex;
     }
-    while(fileIndex != -1);
+
+    disk.write(currentDir.blockNo, (uint8_t*)currentDir.entries);
 
     return 0;
 }
@@ -409,15 +419,25 @@ FS::append(std::string filepath1, std::string filepath2)
 
     Datablock buffer;
 
+    //First thing we want to do is check if the writeTo file latest buffer is full. If it is we dont have to do much just copy form the other and write
+
+    //check if the size is 0 in other words that we have filled the latest buffer slot
+    if(currentDir.entries[writeTo].size % 1024)
+    {
+        int blk;
+        int blkValue = currentDir.entries[writeTo].first_blk;
+        while(blkValue != -1)
+        {
+            blk = blkValue;
+            blkValue = FAT[blk];
+            //continue to traverse fat until we reach end of file i.e., -1
+        }
+    }
+
     //if we get zero after modulo 1024 we can just change the fat entry at the end and copy the buffer from the other
     if(currentDir.entries[writeTo].size % 1024)
     {
-        int index = currentDir.entries[writeTo].first_blk;
-        while(index != -1)
-        {
-            //continue to traverse fat until we reach end of file i.e., -1
-            index = FAT[index];
-        }
+
 
         //now we have a position to write into
 
@@ -510,6 +530,11 @@ FS::append(std::string filepath1, std::string filepath2)
 int
 FS::mkdir(std::string dirpath)
 {
+    if(!CheckFileCreation(dirpath))
+    {
+        return -1;
+    }
+
     //find free fatblock
     int freeFat = GetUnusedBlock();
 
@@ -550,6 +575,8 @@ FS::mkdir(std::string dirpath)
     //allocate a new DirBlock
     DirBlock nDir;
 
+    InitDir(nDir);
+
     //create a new entry to put our root dir in
     nEntry.first_blk = 0;
     strcpy(nEntry.file_name, "..");
@@ -557,7 +584,6 @@ FS::mkdir(std::string dirpath)
     nDir.entries[0] = nEntry;
 
     //save to disk
-
     disk.write(freeFat, (uint8_t*)nDir.entries);
 
     return 0;
@@ -581,16 +607,22 @@ FS::cd(std::string dirpath)
 
     //otherwise load
     disk.read(currentDir.entries[dirIndex].first_blk, (uint8_t*)currentDir.entries);
+    currentDir.blockNo = dirIndex;
 
     //add to our current string
     if(dirpath == "..")
     {
+        currDirStr = currDirStr.substr(0, currDirStr.find_last_of('/'));
+
+        //fix when we cd from one directory to root
+        if(currDirStr.empty())
+            currDirStr += '/';
+
         //find latest / and remove everything to the right
-        currDirStr = currDirStr.substr(0, currDirStr.find_last_of('/')+1);
     }
     else
     {
-        if(currDirStr[currDirStr.size()-1] != '/')
+        if(currDirStr.back() != '/')
             currDirStr += '/';
 
         currDirStr += dirpath;
@@ -627,6 +659,8 @@ int FS::GetUnusedBlock()
         if(FAT[i] == FAT_FREE)
             return i;
     }
+
+    return -1;
 }
 
 void FS::SaveFat()
@@ -679,6 +713,8 @@ int FS::FindFile(const std::string& filename)
             }
         }
     }
+
+    return -1;
 }
 
 int FS::FindDirectory(const std::string& dir)
@@ -687,19 +723,11 @@ int FS::FindDirectory(const std::string& dir)
     {
         if(currentDir.entries[i].access_rights != 0 && currentDir.entries[i].type == TYPE_DIR)
         {
-            int j = 0;
-            for(j; j < 54; ++j)
-            {
-                if(dir[j] != currentDir.entries[j].file_name[j])
-                    break;
-            }
-
-            if(j == 54)
-            {
+            if(strcmp(dir.c_str(), currentDir.entries[i].file_name) == 0)
                 return i;
-            }
         }
     }
+    return -1;
 }
 
 void FS::InitDir(DirBlock &dir)
@@ -708,5 +736,22 @@ void FS::InitDir(DirBlock &dir)
     {
         dir.entries[i].access_rights = 0;
     }
+}
+
+std::pair<int,int> FS::FindRm(const std::string& filepath)
+{
+    //for each entry in directory
+    for(int i = 0; i < 64; ++i)
+    {
+        if(currentDir.entries[i].access_rights != 0)
+        {
+            if(strcmp(filepath.c_str(), currentDir.entries[i].file_name) == 0)
+            {
+                return std::make_pair(i, currentDir.entries[i].type);
+            }
+        }
+    }
+
+    return std::make_pair(-1, -1);
 }
 ;;
