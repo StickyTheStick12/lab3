@@ -246,6 +246,7 @@ FS::cp(std::string sourcepath, std::string destpath)
     {
         std::cout << "there was an error with the destpath when copying the file. The destpath most probably "
                      "already exists in this directory" << std::endl;
+        return -1;
     }
 
     // next see if we can add it to the fat
@@ -350,6 +351,8 @@ FS::mv(std::string sourcepath, std::string destpath)
         strcpy(currentDir.entries[fileIndex].file_name, destpath.c_str());
         disk.write(0, (uint8_t*)currentDir.entries);
     }
+    else
+        return -1;
 
     return 0;
 }
@@ -370,13 +373,13 @@ FS::rm(const std::string& filepath)
 
     //delete from direntries
     currentDir.entries[fileIndex].access_rights = 0;
-    int nextIndex = fileIndex;
-    //TODO: fix this
+
+    fileIndex = currentDir.entries[fileIndex].first_blk;
+
     do
     {
-        nextIndex = FAT[currentDir.entries[nextIndex].first_blk];
-        FAT[currentDir.entries[fileIndex].first_blk] = FAT_EOF;
-
+        int nextIndex = FAT[fileIndex];
+        FAT[fileIndex] = FAT_EOF;
         fileIndex = nextIndex;
     }
     while(fileIndex != -1);
@@ -580,13 +583,16 @@ FS::cd(std::string dirpath)
     disk.read(currentDir.entries[dirIndex].first_blk, (uint8_t*)currentDir.entries);
 
     //add to our current string
-    if(strcmp(currentDir.entries[dirIndex].file_name, "..") == 0)
+    if(dirpath == "..")
     {
         //find latest / and remove everything to the right
-        currDirStr = currDirStr.substr(0, currDirStr.find_last_of('/'));
+        currDirStr = currDirStr.substr(0, currDirStr.find_last_of('/')+1);
     }
     else
     {
+        if(currDirStr[currDirStr.size()-1] != '/')
+            currDirStr += '/';
+
         currDirStr += dirpath;
     }
 
@@ -644,17 +650,17 @@ int FS::FindFreeDirPlace(DirBlock& dir)
 
 bool FS::CheckFileCreation(const std::string& filename)
 {
-    //first check size that we can fit the filename in our char array. If we cant we cant create the file
+    //first check size that we can fit the filename in our char array. If we cant, we can't create the file
     if(filename.size() > 54)
         return false;
 
     //second check that it doesn't exist
     for(int i = 0; i < 64; ++i) //max amount of files in a directory
     {
-        for (int j = 0; j < 56; ++j)
+        if(currentDir.entries[i].access_rights != 0)
         {
-            if(currentDir.entries[i].file_name[j] != filename[j]) //TODO: dont compare char arr with string
-                break;
+            if(strcmp(currentDir.entries[i].file_name, filename.c_str()) == 0)
+                return false;
         }
     }
 
@@ -703,5 +709,4 @@ void FS::InitDir(DirBlock &dir)
         dir.entries[i].access_rights = 0;
     }
 }
-
 ;;
