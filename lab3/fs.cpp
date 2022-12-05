@@ -70,13 +70,17 @@ FS::format()
 int
 FS::create(const std::string& filepath)
 {
-    if(filepath)
-    {
+    //check if it is abolsutepath
 
-    }
+    int16_t temp = currentDir.blockNo;
+
+    std::pair<DirBlock*, std::string> dirPair = GetDir(filepath);
+
+    if(dirPair.first->blockNo == -1)
+        return -1;
 
     // check for file errors
-    if(!CheckFileCreation(filepath))
+    if(!CheckFileCreation(filepath, *dirPair.first))
     {
         std::cout << "Couldn't create this file. An error with the filename occurred";
         return -1;
@@ -92,7 +96,7 @@ FS::create(const std::string& filepath)
     }
 
     //check that we can add to the current directory
-    int dirIndex = FindFreeDirPlace(currentDir);
+    int dirIndex = FindFreeDirPlace(*dirPair.first);
 
     if(dirIndex == -1)
     {
@@ -106,8 +110,9 @@ FS::create(const std::string& filepath)
     file.dirEntry.size = 0;
     file.dirEntry.type = TYPE_FILE;
     file.dirEntry.first_blk = fatIndex;
-    std::copy(std::begin(filepath), std::end(filepath), file.dirEntry.file_name);
-    file.dirEntry.file_name[filepath.size()] = '\0';
+    std::copy(std::begin(dirPair.second), std::end(dirPair.second), file.dirEntry.file_name);
+    if(dirPair.second.size() < 54)
+        file.dirEntry.file_name[dirPair.second.size()] = '\0';
     file.dirEntry.access_rights = 7;
 
     std::fill(std::begin(file.buffer), std::end(file.buffer), 0);
@@ -159,6 +164,13 @@ FS::create(const std::string& filepath)
 
     //save direntry to the directory
     currentDir.entries[dirIndex] = file.dirEntry;
+
+    std::cout << dirPair.first->blockNo << std::endl;
+
+    disk.write(dirPair.first->blockNo, (uint8_t*)dirPair.first->entries);
+
+    disk.read(temp, (uint8_t*)currentDir.entries);
+    currentDir.blockNo = temp;
 
     return 0;
 }
@@ -276,7 +288,7 @@ int
 FS::cp(const std::string& sourcepath, const std::string& destpath)
 {
     //begin with checking if destpath exists
-    if(!CheckFileCreation(destpath))
+    if(!CheckFileCreation(destpath, currentDir))
     {
         std::cout << "there was an error with the destpath when copying the file. The destpath most probably "
                      "already exists in this directory" << std::endl;
@@ -385,7 +397,7 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
         return -1;
     }
 
-    if(CheckFileCreation(destpath))
+    if(CheckFileCreation(destpath, currentDir))
     {
         strcpy(currentDir.entries[fileIndex].file_name, destpath.c_str());
         disk.write(0, (uint8_t*)currentDir.entries);
@@ -571,7 +583,7 @@ FS::append(const std::string& filepath1, const std::string& filepath2)
 int
 FS::mkdir(const std::string& dirpath)
 {
-    if(!CheckFileCreation(dirpath))
+    if(!CheckFileCreation(dirpath, currentDir))
     {
         return -1;
     }
@@ -728,7 +740,7 @@ int FS::FindFreeDirPlace(DirBlock& dir)
     return -1;
 }
 
-bool FS::CheckFileCreation(const std::string& filename)
+bool FS::CheckFileCreation(const std::string& filename, const DirBlock& dir)
 {
     //first check size that we can fit the filename in our char array. If we cant, we can't create the file
     if(filename.size() > 54)
@@ -737,9 +749,9 @@ bool FS::CheckFileCreation(const std::string& filename)
     //second check that it doesn't exist
     for(int i = 0; i < 64; ++i) //max amount of files in a directory
     {
-        if(currentDir.entries[i].access_rights != 0)
+        if(dir.entries[i].access_rights != 0)
         {
-            if(strcmp(currentDir.entries[i].file_name, filename.c_str()) == 0)
+            if(strcmp(dir.entries[i].file_name, filename.c_str()) == 0)
                 return false;
         }
     }
@@ -799,5 +811,35 @@ std::pair<int,int> FS::FindRm(const std::string& filepath)
     }
 
     return std::make_pair(-1, -1);
+}
+
+std::pair<DirBlock*, std::string> FS::GetDir(const std::string& path)
+{
+    int start = 0;
+    int end = path.find('/');
+
+    DirBlock* dir = &currentDir;
+
+    while(end != std::string::npos)
+    {
+        //we will see if we can find the directory
+        int index = FindDirectory(path.substr(start, end - start));
+
+        if(index == -1)
+        {
+            dir->blockNo = -1;
+            return std::make_pair(dir, path);
+        }
+
+        uint16_t blck = dir->entries->first_blk;
+
+        disk.read(blck, (uint8_t*)dir->entries);
+        dir->blockNo = blck;
+
+        start = end + 1;
+        end = path.find('/', start);
+    }
+
+    return std::make_pair(dir, path.substr(start, end));
 }
 ;;

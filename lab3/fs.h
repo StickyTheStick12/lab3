@@ -91,13 +91,14 @@ private:
     int GetUnusedBlock();
 
     //#-----FILE FUNCTIONS-----#
-    bool CheckFileCreation(const std::string& filename);
+    bool CheckFileCreation(const std::string& filename, const DirBlock& dir);
     int FindFile(const std::string& filename);
 
     //#-----DIRECTORY FUNCTIONS-----#
     int FindFreeDirPlace(DirBlock& dir);
     int FindDirectory(const std::string& dir);
     void InitDir(DirBlock& dir);
+    std::pair<DirBlock*, std::string> GetDir(const std::string& path);
 
     std::pair<int,int> FindRm(const std::string& filepath);
 };
