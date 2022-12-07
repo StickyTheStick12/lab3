@@ -4,19 +4,20 @@
 #include "fs.h"
 
 //error list
-// -1. couldn't not find object
-// -2. couldn't not allocate space for object
+// -1. could not find object
+// -2. could not allocate space for object
 // -3. missing access rights
+// -4. file already exists
 
 //TODO:
 // APPEND
-// chmod with absolute path
 
 //TODO:
-// append
-// mkdir
-// cd
-// chmod
+// append --- accessrights, abs/rel path
+// cd --- accessrights, abs/rel path, make sure accessrights is changed when we cd
+// chmod --- abs/rel path
+// mv --- accessrights, abs/rel path
+// rm --- accessrights, abs/rel path
 
 
 std::string currDirStr = "/";
@@ -48,11 +49,10 @@ FS::format()
 
     //create a new rootDir
     DirBlock rootDir;
-
     InitDir(rootDir);
 
     //write rootDir to disk
-    disk.write(0, (uint8_t*)&rootDir);
+    disk.write(0, (uint8_t*)&rootDir.entries);
 
     //save rootDir as our current dir
     currentDir = rootDir;
@@ -76,24 +76,28 @@ FS::format()
 int
 FS::create(const std::string& filepath)
 {
-    int16_t temp = currentDir.blockNo;
+    int16_t block = currentDir.blockNo;
+    uint8_t access = currentDir.access_right;
 
-    std::pair<DirBlock*, std::string> dirPair = GetDir(filepath);
+    //std::pair<DirBlock*, std::string> dirPair = GetDir(filepath);
+    std::pair<DirBlock, std::string> dirPair = GetDir(filepath);
 
-    if(dirPair.first->blockNo == -1)
+
+    if(dirPair.first.blockNo == -1)
     {
         std::cout << "could not find that directory" << std::endl;
         return -1;
     }
 
     //check if we have write permission on the folder
-    if(dirPair.first->access_right != 6 && dirPair.first->access_right != 7)
+    if(dirPair.first.access_right != 6 && dirPair.first.access_right != 7 && dirPair.first.access_right != 2)
     {
+        std::cout << "not permission" << std::endl;
         return -3;
     }
 
     // check for file errors
-    if(!CheckFileCreation(filepath, *dirPair.first))
+    if(!CheckFileCreation(filepath, dirPair.first))
     {
         return -4;
     }
@@ -104,11 +108,11 @@ FS::create(const std::string& filepath)
     if(fatIndex == -1)
     {
         std::cout << "couldn't allocate a fat entry, the FAT is probably full" << std::endl;
-        return -1;
+        return -2;
     }
 
     //check that we can add to the current directory
-    int dirIndex = FindFreeDirPlace(*dirPair.first);
+    int dirIndex = FindFreeDirPlace(dirPair.first);
 
     if(dirIndex == -1)
     {
@@ -178,12 +182,13 @@ FS::create(const std::string& filepath)
     disk.write(writePos, (uint8_t*)file.buffer);
 
     //save direntry to the directory
-    currentDir.entries[dirIndex] = file.dirEntry;
+    dirPair.first.entries[dirIndex] = file.dirEntry;
 
-    disk.write(dirPair.first->blockNo, (uint8_t*)dirPair.first->entries);
+    disk.write(dirPair.first.blockNo, (uint8_t*)dirPair.first.entries);
 
-    disk.read(temp, (uint8_t*)currentDir.entries);
-    currentDir.blockNo = temp;
+    disk.read(block, (uint8_t*)currentDir.entries);
+    currentDir.blockNo = block;
+    currentDir.access_right = access;
 
     return 0;
 }
@@ -192,20 +197,19 @@ FS::create(const std::string& filepath)
 int
 FS::cat(const std::string& filepath)
 {
-    int16_t temp = currentDir.blockNo;
+    int16_t block = currentDir.blockNo;
+    uint8_t access = currentDir.access_right;
 
-    std::pair<DirBlock*, std::string> dirPair = GetDir(filepath);
+    std::pair<DirBlock, std::string> dirPair = GetDir(filepath);
 
-    if(dirPair.first->blockNo == -1)
+    if(dirPair.first.blockNo == -1)
     {
         std::cout << "couldn't find this directory" << std::endl;
         return -1;
     }
 
-    //check that we have permissions
-
     //check that file actually exists
-    int fileIndex = FindFile(filepath);
+    int fileIndex = FindFile(filepath, dirPair.first);
 
     if(fileIndex == -1)
     {
@@ -213,14 +217,15 @@ FS::cat(const std::string& filepath)
         return -1;
     }
 
-    if(currentDir.entries[fileIndex].access_rights < 4)
+    //check that we have permissions
+    if(dirPair.first.entries[fileIndex].access_rights < 4)
     {
-        std::cout << "lacking read access for this file" << std::endl;
+        std::cout << "missing access to this file" << std::endl;
         return -3;
     }
 
     //allocate a new FatEntry
-    int16_t fatIndex = currentDir.entries[fileIndex].first_blk;
+    int16_t fatIndex = dirPair.first.entries[fileIndex].first_blk;
     Datablock buffer;
 
     do
@@ -236,6 +241,10 @@ FS::cat(const std::string& filepath)
         fatIndex = FAT[fatIndex];
     }
     while(fatIndex != -1);    //check if the fat points to anymore data
+
+    currentDir.blockNo = block;
+    currentDir.access_right = access;
+    disk.read(block, (uint8_t*)currentDir.entries);
 
     //end the line
     std::cout << std::endl;
@@ -309,10 +318,56 @@ FS::ls()
 int
 FS::cp(const std::string& sourcepath, const std::string& destpath)
 {
-    //begin with checking if destpath exists
-    if(!CheckFileCreation(destpath, currentDir))
+    int16_t block = currentDir.blockNo;
+    uint8_t access = currentDir.access_right;
+
+    //---------------SourcePath error check------------------//
+    //first load source path directory
+    std::pair<DirBlock, std::string> sourceDir = GetDir(sourcepath);
+
+    //check if it exists
+    if(sourceDir.first.blockNo == -1)
     {
         return -1;
+    }
+
+    //check if file exists in this directory
+    int sourceFileIndex = FindFile(sourceDir.second, sourceDir.first);
+
+    if(sourceFileIndex == -1)
+    {
+        return -1;
+    }
+
+    //check that we have read access on the file
+    if(currentDir.entries[sourceFileIndex].access_rights < 4)
+    {
+        std::cout << "missing permission for reading sourcefile" << std::endl;
+        return -3;
+    }
+
+    //---------------destPath error check------------------//
+    //load destDir
+    std::pair<DirBlock, std::string> destDir = GetDir(destpath);
+
+    // check if it exists
+    if(destDir.first.blockNo == -1)
+    {
+        return -1;
+    }
+
+    //check that the file doesn't exist
+    if(!CheckFileCreation(destDir.second, destDir.first))
+    {
+        std::cout << "sourcefile already exists in this directory" << std::endl;
+        return -4;
+    }
+
+    //check for write permission in that folder
+    if(!(currentDir.access_right > 1 && currentDir.access_right != 5 && currentDir.access_right != 4))
+    {
+        std::cout << "missing permission for writing in this folder" << std::endl;
+        return -3;
     }
 
     // next see if we can add it to the fat
@@ -330,31 +385,7 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
     if(dirIndex == -1)
     {
         std::cout << "couldn't allocate any more space in this directory" << std::endl;
-        return -1;
-    }
-
-    // see if source exists
-    int sourceFileIndex = FindFile(sourcepath);
-
-    if(sourceFileIndex == -1)
-    {
-        return -1;
-    }
-
-    //check permissions for dir
-
-    if(!(currentDir.access_right > 1 && currentDir.access_right != 5))
-    {
-        std::cout << "missing permission for writing in this folder" << std::endl;
-        return -3;
-    }
-
-    int temp = currentDir.entries[sourceFileIndex].access_rights;
-
-    if(!(temp == 2 || temp > 5))
-    {
-        std::cout << "missing permission for reading sourcefile" << std::endl;
-        return -3;
+        return -2;
     }
 
     //allocate a file
@@ -363,20 +394,21 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
     std::fill(std::begin(file.buffer), std::end(file.buffer), 0);
 
     //give it a name
-    std::copy(std::begin(destpath), std::end(destpath), file.dirEntry.file_name);
-    file.dirEntry.file_name[destpath.size()] = '\0';
+    std::copy(std::begin(destDir.second), std::end(destDir.second), file.dirEntry.file_name);
+    if(destDir.second.size() < 55)
+        file.dirEntry.file_name[destDir.second.size()] = '\0';
 
     //give it a size
-    file.dirEntry.size = currentDir.entries[sourceFileIndex].size;
+    file.dirEntry.size = sourceDir.first.entries[sourceFileIndex].size;
     file.dirEntry.type = TYPE_FILE;
     file.dirEntry.first_blk = fatIndexNewFile;
-    file.dirEntry.access_rights = temp;
+    file.dirEntry.access_rights = sourceDir.first.entries[sourceFileIndex].access_rights;
 
     //save dirEntry to dir
-    currentDir.entries[dirIndex] = file.dirEntry;
+    destDir.first.entries[dirIndex] = file.dirEntry;
 
     //save dir to disk
-    disk.write(0, (uint8_t*)currentDir.entries);
+    disk.write(destDir.first.blockNo, (uint8_t*)destDir.first.entries);
 
     //save to Fat
     FAT[fatIndexNewFile] = FAT_EOF;
@@ -385,7 +417,7 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
     SaveFat();
 
     //fetch the first block for the file
-    int fatIndexOldFile = currentDir.entries[sourceFileIndex].first_blk;
+    int fatIndexOldFile = sourceDir.first.entries[sourceFileIndex].first_blk;
 
     // we will read one block and write this to the disk
     // we will then set fatIndexOfFile to FAT[fatIndexOldFile]
@@ -409,6 +441,11 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
         }
     }
 
+    currentDir.blockNo = block;
+    currentDir.access_right = access;
+
+    disk.read(block, (uint8_t*)currentDir.entries);
+
     return 0;
 }
 
@@ -418,7 +455,7 @@ int
 FS::mv(const std::string& sourcepath, const std::string& destpath)
 {
     //check if sourepath exists
-    int fileIndex = FindFile(sourcepath);
+    int fileIndex = FindFile(sourcepath, currentDir);
 
     if(fileIndex == -1)
     {
@@ -490,8 +527,8 @@ FS::rm(const std::string& filepath)
 int
 FS::append(const std::string& filepath1, const std::string& filepath2)
 {
-    int copyFrom = FindFile(filepath1);
-    int writeTo = FindFile(filepath2);
+    int copyFrom = FindFile(filepath1, currentDir);
+    int writeTo = FindFile(filepath2, currentDir);
 
     if(copyFrom == -1)
     {
@@ -506,6 +543,21 @@ FS::append(const std::string& filepath1, const std::string& filepath2)
     }
 
     Datablock buffer;
+
+    //first thing we want to do is check if the size is divsible by 1024. If it is that means that the buffer is full
+    //if it is true we will see if we can create a new fat block and find the latest entry in
+
+    // if it is true we will find the latest fat entry
+
+
+
+
+
+
+
+    //first thing we want to do is find latest fat entry for write to file.
+
+    //we want to check if the latest
 
     //First thing we want to do is check if the writeTo file latest buffer is full. If it is we dont have to do much just copy form the other and write
 
@@ -613,24 +665,25 @@ int
 FS::mkdir(const std::string& dirpath)
 {
     //first find dir
-    int16_t temp = currentDir.blockNo;
+    int16_t block = currentDir.blockNo;
+    uint8_t access_rights = currentDir.access_right;
 
-    std::pair<DirBlock*, std::string> dirPair = GetDir(dirpath);
+    std::pair<DirBlock, std::string> dirPair = GetDir(dirpath);
     //check permissions for that folder
 
-    if(dirPair.first->blockNo == -1)
+    if(dirPair.first.blockNo == -1)
     {
         std::cout << "couldn't find this path" << std::endl;
         return -1;
     }
 
-    if(dirPair.first->access_right < 6 && dirPair.first->access_right != 2)
+    if(dirPair.first.access_right < 6 && dirPair.first.access_right != 2)
     {
         std::cout << "missing access" << std::endl;
         return -3;
     }
 
-    if(!CheckFileCreation(dirpath, *dirPair.first))
+    if(!CheckFileCreation(dirpath, dirPair.first))
     {
         return -1;
     }
@@ -645,7 +698,7 @@ FS::mkdir(const std::string& dirpath)
     }
 
     //find empty dirPlace
-    int fDir = FindFreeDirPlace(*dirPair.first);
+    int fDir = FindFreeDirPlace(dirPair.first);
 
     if(fDir == -1)
     {
@@ -670,10 +723,10 @@ FS::mkdir(const std::string& dirpath)
     nEntry.access_rights = 6;
 
     //add to current directory
-    currentDir.entries[fDir] = nEntry;
+    dirPair.first.entries[fDir] = nEntry;
 
     //save dir
-    disk.write(dirPair.first->blockNo, (uint8_t*)dirPair.first->entries);
+    disk.write(dirPair.first.blockNo, (uint8_t*)dirPair.first.entries);
 
     //allocate a new DirBlock
     DirBlock nDir;
@@ -689,8 +742,9 @@ FS::mkdir(const std::string& dirpath)
     //save to disk
     disk.write(freeFat, (uint8_t*)nDir.entries);
 
-    disk.read(temp, (uint8_t*)currentDir.entries);
-    currentDir.blockNo = temp;
+    disk.read(block, (uint8_t*)currentDir.entries);
+    currentDir.blockNo = block;
+    currentDir.access_right = access_rights;
 
     return 0;
 }
@@ -819,13 +873,13 @@ bool FS::CheckFileCreation(const std::string& filename, const DirBlock& dir)
     return true;
 }
 
-int FS::FindFile(const std::string& filename)
+int FS::FindFile(const std::string& filename, const DirBlock& dirBlock)
 {
     for(int i = 0; i < 64; ++i)
     {
-        if(currentDir.entries[i].access_rights != 0 && currentDir.entries[i].type == TYPE_FILE)
+        if(dirBlock.entries[i].access_rights != 0 && dirBlock.entries[i].type == TYPE_FILE)
         {
-            if(strcmp(currentDir.entries[i].file_name, filename.c_str()) == 0)
+            if(strcmp(dirBlock.entries[i].file_name, filename.c_str()) == 0)
             {
                 return i;
             }
@@ -873,20 +927,19 @@ std::pair<int,int> FS::FindRm(const std::string& filepath)
     return std::make_pair(-1, -1);
 }
 
-std::pair<DirBlock*, std::string> FS::GetDir(const std::string& path)
+std::pair<DirBlock, std::string> FS::GetDir(const std::string& path)
 {
-    //first check if it is an absolute path
+    DirBlock dir = currentDir;
+
     if(path[0] == '/')
     {
-        disk.read(0, (uint8_t*)currentDir.entries);
-        currentDir.blockNo = 0;
-        currentDir.access_right = 6;
+        disk.read(0, (uint8_t*)dir.entries);
+        dir.blockNo = 0;
+        dir.access_right = 6;
     }
 
     int start = 0;
     int end = path.find('/');
-
-    DirBlock* dir = &currentDir;
 
     while(end != std::string::npos)
     {
@@ -895,14 +948,16 @@ std::pair<DirBlock*, std::string> FS::GetDir(const std::string& path)
 
         if(index == -1)
         {
-            dir->blockNo = -1;
+            dir.blockNo = -1;
+            std::cout << "Couldn't find the directory" << std::endl;
             return std::make_pair(dir, path);
         }
 
-        uint16_t blck = dir->entries->first_blk;
+        uint16_t blck = dir.entries[index].first_blk;
+        dir.blockNo = blck;
+        dir.access_right = dir.entries[index].access_rights;
 
-        disk.read(blck, (uint8_t*)dir->entries);
-        dir->blockNo = blck;
+        disk.read(blck, (uint8_t*)dir.entries);
 
         start = end + 1;
         end = path.find('/', start);
