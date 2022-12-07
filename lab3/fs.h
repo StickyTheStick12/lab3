@@ -30,6 +30,7 @@ struct DirBlock
 {
     dir_entry entries[64]; // change this
     int16_t blockNo;
+    uint8_t access_right;
 };
 
 
