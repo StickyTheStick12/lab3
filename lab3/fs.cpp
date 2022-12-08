@@ -455,14 +455,32 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
     int16_t block = currentDir.blockNo;
     uint8_t access = currentDir.access_right;
 
-    std::pair<DirBlock, std::string> destDir = GetDir(destpath);
+    //---------------SourcePath error check------------------//
+    //first load source path directory
     std::pair<DirBlock, std::string> sourceDir = GetDir(sourcepath);
 
-    if(sourceDir.first.blockNo == -1 || destDir.first.blockNo == -1)
+    if(sourceDir.first.blockNo == -1)
     {
         std::cout << "could not find that directory" << std::endl;
         return -1;
     }
+
+    //check if sourepath exists
+    int readPos = FindFile(sourceDir.second, sourceDir.first);
+
+    if(readPos == -1)
+    {
+        std::cout << "couldn't find source file" << std::endl;
+        return -1;
+    }
+
+    dir_entry fileDir = sourceDir.first.entries[readPos];
+    sourceDir.first.entries[readPos].access_rights = 0;
+    disk.write(sourceDir.first.blockNo, (uint8_t*)sourceDir.first.entries);
+
+    disk.read(block, (uint8_t*)currentDir.entries);
+
+    std::pair<DirBlock, std::string> destDir = GetDir(destpath);
 
     //Check if the last entry is a directory, in other words that we want to mv to a directory and not rename
     int dirIndex = FindDirectory(destDir.second);
@@ -471,7 +489,7 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
     //if it is a directory load it
     if(dirIndex != -1)
     {
-        ///load access when changing
+        destDir.first.access_right = destDir.first.entries[dirIndex].access_rights;
         temp = destDir.first.entries[dirIndex].first_blk;
         destDir.first.access_right = destDir.first.entries[dirIndex].access_rights;
         disk.read(temp, (uint8_t*)destDir.first.entries);
@@ -485,15 +503,6 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
         return -3;
     }
 
-    //check if sourepath exists
-    int readPos = FindFile(sourceDir.second, sourceDir.first);
-
-    if(readPos == -1)
-    {
-        std::cout << "couldn't find source file" << std::endl;
-        return -1;
-    }
-
     int writePos = FindFreeDirPlace(destDir.first);
 
     if(writePos == -1)
@@ -505,20 +514,25 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
     if(CheckFileCreation(destDir.second, destDir.first))
     {
         //now we want to save that fileentry to the write dir
-        destDir.first.entries[writePos] = sourceDir.first.entries[readPos];
+        destDir.first.entries[writePos] = fileDir;
         strcpy(destDir.first.entries[writePos].file_name, destDir.second.c_str());
-        //mark space as free
-        sourceDir.first.entries[readPos].access_rights = 0;
-        //write to disk
+        //both will write to the same block number which will result that we overwrite the value
         disk.write(temp, (uint8_t*)destDir.first.entries);
-        disk.write(sourceDir.first.blockNo, (uint8_t*)sourceDir.first.entries);
 
         currentDir.blockNo = block;
         currentDir.access_right = access;
         disk.read(block, (uint8_t*)currentDir.entries);
     }
     else
+    {
+        sourceDir.first.entries[readPos] = fileDir;
+        disk.write(sourceDir.first.blockNo, (uint8_t*)sourceDir.first.entries);
+        currentDir.blockNo = block;
+        currentDir.access_right = access;
+        disk.read(block, (uint8_t*)currentDir.entries);
+
         return -4;
+    }
 
     return 0;
 }
