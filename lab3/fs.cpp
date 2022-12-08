@@ -10,14 +10,11 @@
 // -4. file already exists
 
 //TODO:
-// APPEND
-
-//TODO:
 // append --- accessrights, abs/rel path
 // cd --- accessrights, abs/rel path, make sure accessrights is changed when we cd
 // chmod --- abs/rel path
-// mv --- accessrights, abs/rel path
 // rm --- accessrights, abs/rel path
+// cp cant copy file to directory
 
 
 std::string currDirStr = "/";
@@ -336,7 +333,8 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
 
     if(sourceFileIndex == -1)
     {
-        return -1;
+        std::cout << "couldnt find sourcefile" << std::endl;
+        return -4;
     }
 
     //check that we have read access on the file
@@ -454,22 +452,73 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
 int
 FS::mv(const std::string& sourcepath, const std::string& destpath)
 {
-    //check if sourepath exists
-    int fileIndex = FindFile(sourcepath, currentDir);
+    int16_t block = currentDir.blockNo;
+    uint8_t access = currentDir.access_right;
 
-    if(fileIndex == -1)
+    std::pair<DirBlock, std::string> destDir = GetDir(destpath);
+    std::pair<DirBlock, std::string> sourceDir = GetDir(sourcepath);
+
+    if(sourceDir.first.blockNo == -1 || destDir.first.blockNo == -1)
+    {
+        std::cout << "could not find that directory" << std::endl;
+        return -1;
+    }
+
+    //Check if the last entry is a directory, in other words that we want to mv to a directory and not rename
+    int dirIndex = FindDirectory(destDir.second);
+    int temp = destDir.first.blockNo;
+
+    //if it is a directory load it
+    if(dirIndex != -1)
+    {
+        ///load access when changing
+        temp = destDir.first.entries[dirIndex].first_blk;
+        destDir.first.access_right = destDir.first.entries[dirIndex].access_rights;
+        disk.read(temp, (uint8_t*)destDir.first.entries);
+        destDir.second = sourceDir.second;
+    }
+
+    //check write permissions for that folder
+    if(destDir.first.access_right != 6 && destDir.first.access_right != 7 && destDir.first.access_right != 2)
+    {
+        std::cout << "not permission" << std::endl;
+        return -3;
+    }
+
+    //check if sourepath exists
+    int readPos = FindFile(sourceDir.second, sourceDir.first);
+
+    if(readPos == -1)
     {
         std::cout << "couldn't find source file" << std::endl;
         return -1;
     }
 
-    if(CheckFileCreation(destpath, currentDir))
+    int writePos = FindFreeDirPlace(destDir.first);
+
+    if(writePos == -1)
     {
-        strcpy(currentDir.entries[fileIndex].file_name, destpath.c_str());
-        disk.write(0, (uint8_t*)currentDir.entries);
+        std::cout << "couldn't allocate a new entry in this directory" << std::endl;
+        return -2;
+    }
+
+    if(CheckFileCreation(destDir.second, destDir.first))
+    {
+        //now we want to save that fileentry to the write dir
+        destDir.first.entries[writePos] = sourceDir.first.entries[readPos];
+        strcpy(destDir.first.entries[writePos].file_name, destDir.second.c_str());
+        //mark space as free
+        sourceDir.first.entries[readPos].access_rights = 0;
+        //write to disk
+        disk.write(temp, (uint8_t*)destDir.first.entries);
+        disk.write(sourceDir.first.blockNo, (uint8_t*)sourceDir.first.entries);
+
+        currentDir.blockNo = block;
+        currentDir.access_right = access;
+        disk.read(block, (uint8_t*)currentDir.entries);
     }
     else
-        return -1;
+        return -4;
 
     return 0;
 }
@@ -483,7 +532,10 @@ FS::rm(const std::string& filepath)
 
     //check if it was found
     if(rmPair.first == -1)
-        return -2;
+    {
+        std::cout << "couldnt find this object" << std::endl;
+        return -1;
+    }
 
     //check if it was a directory and if that is true check if that directory is empty
     if(rmPair.second == TYPE_DIR)
@@ -544,25 +596,7 @@ FS::append(const std::string& filepath1, const std::string& filepath2)
 
     Datablock buffer;
 
-    //first thing we want to do is check if the size is divsible by 1024. If it is that means that the buffer is full
-    //if it is true we will see if we can create a new fat block and find the latest entry in
-
-    // if it is true we will find the latest fat entry
-
-
-
-
-
-
-
-    //first thing we want to do is find latest fat entry for write to file.
-
-    //we want to check if the latest
-
-    //First thing we want to do is check if the writeTo file latest buffer is full. If it is we dont have to do much just copy form the other and write
-
-    //check if the size is 0 in other words that we have filled the latest buffer slot
-    if(currentDir.entries[writeTo].size % 1024)
+    if(currentDir.entries[writeTo].size % 1024 == 0)
     {
         int blk;
         int blkValue = currentDir.entries[writeTo].first_blk;
@@ -570,91 +604,86 @@ FS::append(const std::string& filepath1, const std::string& filepath2)
         {
             blk = blkValue;
             blkValue = FAT[blk];
-            //continue to traverse fat until we reach end of file i.e., -1
         }
-    }
 
-    //if we get zero after modulo 1024 we can just change the fat entry at the end and copy the buffer from the other
-    if(currentDir.entries[writeTo].size % 1024)
-    {
-
-
-        //now we have a position to write into
-
-        //we will now find the first block in the other file and fetch that data
         int indexCopy = currentDir.entries[copyFrom].first_blk;
 
         while(indexCopy != -1)
         {
-            //read block from file
+            int frFat = GetUnusedBlock();
             disk.read(FAT[indexCopy], (uint8_t*)buffer);
 
-            // find free fatblock to place this
-            int fFat = GetUnusedBlock();
-
-            //write buffer to disk
-            disk.write(fFat, (uint8_t*)buffer);
+            disk.write(frFat, (uint8_t*)buffer);
+            FAT[blk] = frFat;
+            FAT[frFat] = FAT_EOF;
+            blk = frFat;
 
             indexCopy = FAT[indexCopy];
         }
+
+        currentDir.entries[writeTo].size += currentDir.entries[copyFrom].size;
     }
     else
     {
-        //find the latest Fat in the writefile
-        int index = currentDir.entries[writeTo].first_blk;
-        while(index != -1)
-        {
-            //continue to traverse fat until we reach end of file i.e., -1
-            index = FAT[index];
-        }
+        int filePos = currentDir.entries[writeTo].size % 1024;
+        int temp = currentDir.entries[writeTo].first_blk;
+        currentDir.entries[writeTo].size += currentDir.entries[copyFrom].size;
 
         int indexCopy = currentDir.entries[copyFrom].first_blk;
-        File file;
-        file.pos = (currentDir.entries[copyFrom].size%1024)/4;
-        file.dirEntry.first_blk = index;
+        int size = currentDir.entries[copyFrom].size;
 
-        int j = 0;
+        while(temp != -1)
+        {
+            writeTo = temp;
+            temp = FAT[writeTo];
+        }
+
+        disk.read(writeTo, (uint8_t*)buffer);
+
+        Datablock readFrom;
+        int rangeVal;
 
         while(indexCopy != -1)
         {
-            //read block from file
-            disk.read(FAT[indexCopy], (uint8_t*)buffer);
+            disk.read(indexCopy, (uint8_t*)readFrom);
 
-            if(currentDir.entries[copyFrom].size)
+            if(size < 1024)
+            {
+                rangeVal = size;
+            }
+            else
+            {
+                rangeVal = 1024;
+                size -= 1024;
+            }
 
-            //for(int i = 0; i < currentDir.entries[copyFrom].size)
 
-            //WriteChar(file, a)
+            for (int i = 0; i < rangeVal; ++i)
+            {
+                if(filePos == 1024)
+                {
+                    disk.write(writeTo, (uint8_t*)buffer);
+                    int indexNextBlock = GetUnusedBlock();
+                    FAT[writeTo] = indexNextBlock;
+                    SaveFat();
+                    filePos = 0;
+                    writeTo = indexNextBlock;
+                }
 
-            // find free fatblock to place this
-            int fFat = GetUnusedBlock();
-
-            //write buffer to disk
-            //disk.write(fFat, (uint8_t*)buffer);
-
-            //FAT[index] = fFat;
-
-            //FAT[fFat] = FAT_EOF;
-
-            //index = fFat;
+                buffer[filePos++] = readFrom[i];
+            }
 
             indexCopy = FAT[indexCopy];
         }
 
+        if((filePos % 1024) > 0)
+            buffer[filePos++] = '\0';
 
-        //find the first fat in the copyfile
+        //write last block to disk
+        disk.write(writeTo, (uint8_t*)buffer);
 
-        // for each character in buffer call on writechar
+        disk.write(currentDir.blockNo, (uint8_t*)currentDir.entries);
     }
-
-    //we have 2 cases
-
-
-
-
-    // case 2
-    // we have to copy char for char into the new buffer
-
 
     return 0;
 }
