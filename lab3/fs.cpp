@@ -14,7 +14,6 @@
 // cd --- accessrights, abs/rel path, make sure accessrights is changed when we cd
 // chmod --- abs/rel path
 // rm --- accessrights, abs/rel path
-// cp cant copy file to directory
 
 
 std::string currDirStr = "/";
