@@ -18,6 +18,9 @@
 
 typedef char Datablock[4096];
 
+//TODO: OBS!!!!!!!! we can change uint8t to a signed integer and thus store -1 as the access right if we want to remove  this because ze
+// zero can be allowed if we doesnt have access at all.
+
 struct dir_entry{
     char file_name[56]; // name of the file / sub-directory
     uint32_t size; // size of the file in bytes
@@ -97,11 +100,11 @@ private:
 
     //#-----DIRECTORY FUNCTIONS-----#
     int FindFreeDirPlace(DirBlock& dir);
-    int FindDirectory(const std::string& dir);
+    int FindDirectory(const std::string& dir, const DirBlock& dirBlock);
     void InitDir(DirBlock& dir);
     std::pair<DirBlock, std::string> GetDir(const std::string& path);
 
-    std::pair<int,int> FindRm(const std::string& filepath);
+    std::pair<int, DirBlock> FindRm(const std::string& filepath);
 };
 
 #endif // __FS_H__

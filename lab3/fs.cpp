@@ -10,10 +10,7 @@
 // -4. file already exists
 
 //TODO:
-// append --- accessrights, abs/rel path
-// cd --- accessrights, abs/rel path, make sure accessrights is changed when we cd
-// chmod --- abs/rel path
-// rm --- accessrights, abs/rel path
+// mv and cp should be able to work with a directory
 
 
 std::string currDirStr = "/";
@@ -353,6 +350,8 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
         return -1;
     }
 
+    //check if it is a directory or a file.
+
     //check that the file doesn't exist
     if(!CheckFileCreation(destDir.second, destDir.first))
     {
@@ -482,7 +481,7 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
     std::pair<DirBlock, std::string> destDir = GetDir(destpath);
 
     //Check if the last entry is a directory, in other words that we want to mv to a directory and not rename
-    int dirIndex = FindDirectory(destDir.second);
+    int dirIndex = FindDirectory(destDir.second, currentDir);
     int temp = destDir.first.blockNo;
 
     //if it is a directory load it
@@ -540,8 +539,12 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
 int
 FS::rm(const std::string& filepath)
 {
+    int block = currentDir.blockNo;
+
+    int access = currentDir.access_right;
+
     //we will first test if a file exists with this filename
-    std::pair<int,int> rmPair = FindRm(filepath);
+    std::pair<int, DirBlock> rmPair = FindRm(filepath);
 
     //check if it was found
     if(rmPair.first == -1)
@@ -550,18 +553,21 @@ FS::rm(const std::string& filepath)
         return -1;
     }
 
+    //check access
+    if(rmPair.second.entries[rmPair.first].access_rights == 1 ||
+       rmPair.second.entries[rmPair.first].access_rights == 4 ||
+       rmPair.second.entries[rmPair.first].access_rights == 5)
+    {
+        std::cout << "missing access" << std::endl;
+        return -3;
+    }
+
     //check if it was a directory and if that is true check if that directory is empty
-    if(rmPair.second == TYPE_DIR)
+    if(rmPair.second.entries[rmPair.first].type == TYPE_DIR)
     {
         DirBlock temp;
 
-        disk.read(currentDir.entries[rmPair.first].first_blk, (uint8_t*)temp.entries);
-
-        //this should never happen that we need to check for this because it should always contain this in the first spot
-        //if(strcmp("..", temp.entries[0].file_name) != 0)
-        //{
-        //    return -1;
-        //}
+        disk.read(rmPair.second.entries[rmPair.first].first_blk, (uint8_t*)temp.entries);
 
         for(int i = 1; i < 64; ++i)
         {
@@ -570,10 +576,9 @@ FS::rm(const std::string& filepath)
         }
     }
 
-    //delete from direntries
-    currentDir.entries[rmPair.first].access_rights = 0;
+    rmPair.second.entries[rmPair.first].access_rights = 0;
 
-    int fIndex = currentDir.entries[rmPair.first].first_blk;
+    int fIndex = rmPair.second.entries[rmPair.first].first_blk;
 
     while(fIndex != -1)
     {
@@ -582,7 +587,14 @@ FS::rm(const std::string& filepath)
         fIndex = nextIndex;
     }
 
-    disk.write(currentDir.blockNo, (uint8_t*)currentDir.entries);
+    SaveFat();
+
+    disk.write(rmPair.second.blockNo, (uint8_t*)rmPair.second.entries);
+
+    currentDir.access_right = access;
+    currentDir.blockNo = block;
+
+    disk.read(block, (uint8_t*)currentDir.entries);
 
     return 0;
 }
@@ -592,8 +604,11 @@ FS::rm(const std::string& filepath)
 int
 FS::append(const std::string& filepath1, const std::string& filepath2)
 {
-    int copyFrom = FindFile(filepath1, currentDir);
-    int writeTo = FindFile(filepath2, currentDir);
+
+    std::pair<int, DirBlock> copyDir = FindRm(filepath1);
+    std::pair<int, DirBlock> writeDir = FindRm(filepath2);
+    int copyFrom = copyDir.first;
+    int writeTo = writeDir.first;
 
     if(copyFrom == -1)
     {
@@ -607,19 +622,31 @@ FS::append(const std::string& filepath1, const std::string& filepath2)
         return -1;
     }
 
+    if(copyDir.second.entries[copyFrom].access_rights < 4)
+    {
+        std::cout << "insuffienct access rights for copy file" << std::endl;
+        return -3;
+    }
+
+    if(writeDir.second.entries[writeTo].access_rights < 5 && writeDir.second.entries[writeTo].access_rights != 2)
+    {
+        std::cout << "insuffienct access rights for write file" << std::endl;
+        return -3;
+    }
+
     Datablock buffer;
 
-    if(currentDir.entries[writeTo].size % 1024 == 0)
+    if(writeDir.second.entries[writeTo].size % 1024 == 0)
     {
         int blk;
-        int blkValue = currentDir.entries[writeTo].first_blk;
+        int blkValue = writeDir.second.entries[writeTo].first_blk;
         while(blkValue != -1)
         {
             blk = blkValue;
             blkValue = FAT[blk];
         }
 
-        int indexCopy = currentDir.entries[copyFrom].first_blk;
+        int indexCopy = copyDir.second.entries[copyFrom].first_blk;
 
         while(indexCopy != -1)
         {
@@ -634,16 +661,18 @@ FS::append(const std::string& filepath1, const std::string& filepath2)
             indexCopy = FAT[indexCopy];
         }
 
-        currentDir.entries[writeTo].size += currentDir.entries[copyFrom].size;
+        writeDir.second.entries[writeTo].size += copyDir.second.entries[copyFrom].size;
+
+        disk.write(writeDir.second.blockNo, (uint8_t*)writeDir.second.entries);
     }
     else
     {
-        int filePos = currentDir.entries[writeTo].size % 1024;
-        int temp = currentDir.entries[writeTo].first_blk;
-        currentDir.entries[writeTo].size += currentDir.entries[copyFrom].size;
+        int filePos = writeDir.second.entries[writeTo].size % 1024;
+        int temp = writeDir.second.entries[writeTo].first_blk;
+        writeDir.second.entries[writeTo].size += copyDir.second.entries[copyFrom].size;
 
-        int indexCopy = currentDir.entries[copyFrom].first_blk;
-        int size = currentDir.entries[copyFrom].size;
+        int indexCopy = copyDir.second.entries[copyFrom].first_blk;
+        int size = copyDir.second.entries[copyFrom].size;
 
         while(temp != -1)
         {
@@ -695,8 +724,10 @@ FS::append(const std::string& filepath1, const std::string& filepath2)
         //write last block to disk
         disk.write(writeTo, (uint8_t*)buffer);
 
-        disk.write(currentDir.blockNo, (uint8_t*)currentDir.entries);
+        disk.write(currentDir.blockNo, (uint8_t*)writeDir.second.entries);
     }
+
+    disk.read(0, (uint8_t*)currentDir.entries);
 
     return 0;
 }
@@ -725,7 +756,7 @@ FS::mkdir(const std::string& dirpath)
         return -3;
     }
 
-    if(!CheckFileCreation(dirpath, dirPair.first))
+    if(!CheckFileCreation(dirPair.second, dirPair.first))
     {
         return -1;
     }
@@ -776,7 +807,7 @@ FS::mkdir(const std::string& dirpath)
     InitDir(nDir);
 
     //create a new entry to put our root dir in
-    nEntry.first_blk = 0;
+    nEntry.first_blk = dirPair.first.blockNo;
     strcpy(nEntry.file_name, "..");
 
     nDir.entries[0] = nEntry;
@@ -795,40 +826,81 @@ FS::mkdir(const std::string& dirpath)
 int
 FS::cd(const std::string& dirpath)
 {
-    // first we will look for dirpath
-    int dirIndex = FindDirectory(dirpath);
+    std::pair<DirBlock, std::string> nDir = GetDir(dirpath);
 
-    //if we cant find it return -1;
-    if(dirIndex == -1)
+    //if we cant find it return -1
+    if(nDir.first.blockNo == -1)
     {
         std::cout << "couldn't find this directory" << std::endl;
         return -1;
     }
 
-    //otherwise load
-    currentDir.access_right = currentDir.entries[dirIndex].access_rights;
-    disk.read(currentDir.entries[dirIndex].first_blk, (uint8_t*)currentDir.entries);
-    currentDir.blockNo = dirIndex;
+    // we now have to find the last directory
 
+    int index = FindDirectory(nDir.second, nDir.first);
 
-    //add to our current string
-    if(dirpath == "..")
+    if(index == -1)
     {
-        currDirStr = currDirStr.substr(0, currDirStr.find_last_of('/'));
+        std::cout << "couldnt find this directory" << std::endl;
+        return -1;
+    }
 
-        //fix when we cd from one directory to root
-        if(currDirStr.empty())
-            currDirStr += '/';
+    if(nDir.first.entries[index].access_rights < 4)
+    {
+        std::cout << "not suffienct access rights" << std::endl;
+        return -3;
+    }
 
-        //find latest / and remove everything to the right
+    currentDir.access_right = nDir.first.entries[index].access_rights;
+    currentDir.blockNo = nDir.first.entries[index].first_blk;
+
+    //otherwise load
+    disk.read(nDir.first.entries[index].first_blk, (uint8_t*)currentDir.entries);
+
+    if(dirpath[0] == '/')
+    {
+        currDirStr = dirpath;
+        return 0;
+    }
+
+    //first perfom .. if any
+    int start = 0;
+    int end = dirpath.find('/');
+
+    if(end == std::string::npos)
+    {
+        if(dirpath == "..")
+        {
+            currDirStr = currDirStr.substr(0, currDirStr.find_last_of('/'));
+
+            //fix when we cd from one directory to root
+            if(currDirStr.empty())
+                currDirStr += '/';
+
+            return 0;
+        }
     }
     else
     {
-        if(currDirStr.back() != '/')
-            currDirStr += '/';
+        while(end != std::string::npos)
+        {
+            if(dirpath.substr(start, end-start) == "..")
+            {
+                currDirStr = currDirStr.substr(0, currDirStr.find_last_of('/'));
 
-        currDirStr += dirpath;
+                //fix when we cd from one directory to root
+                if(currDirStr.empty())
+                    currDirStr += '/';
+            }
+            else
+                break;
+
+            start = end + 1;
+            end = dirpath.find('/', start);
+        }
     }
+
+    currDirStr += dirpath.substr(start, std::string::npos);
 
     return 0;
 }
@@ -848,14 +920,19 @@ FS::pwd()
 int
 FS::chmod(const std::string& accessrights, const std::string& filepath)
 {
-    std::pair<int, int> filePair = FindRm(filepath);
+    std::pair<int, DirBlock> filePair = FindRm(filepath);
 
     if(filePair.first == -1)
+    {
+        std::cout << "couldn't find this object in this directory" << std::endl;
         return -1;
+    }
 
-    currentDir.entries[filePair.first].access_rights = stoi(accessrights);
+    filePair.second.entries[filePair.first].access_rights = stoi(accessrights);
 
-    disk.write(currentDir.blockNo, (uint8_t*)currentDir.entries);
+    disk.write(filePair.second.blockNo, (uint8_t*)filePair.second.entries);
+
+    disk.read(currentDir.blockNo, (uint8_t*)currentDir.entries);
 
     return 0;
 }
@@ -931,13 +1008,13 @@ int FS::FindFile(const std::string& filename, const DirBlock& dirBlock)
     return -1;
 }
 
-int FS::FindDirectory(const std::string& dir)
+int FS::FindDirectory(const std::string& dir, const DirBlock& dirBlock)
 {
     for(int i = 0; i < 64; ++i)
     {
-        if(currentDir.entries[i].access_rights != 0 && currentDir.entries[i].type == TYPE_DIR)
+        if(dirBlock.entries[i].access_rights != 0 && dirBlock.entries[i].type == TYPE_DIR)
         {
-            if(strcmp(dir.c_str(), currentDir.entries[i].file_name) == 0)
+            if(strcmp(dir.c_str(), dirBlock.entries[i].file_name) == 0)
                 return i;
         }
     }
@@ -952,46 +1029,63 @@ void FS::InitDir(DirBlock &dir)
     }
 }
 
-std::pair<int,int> FS::FindRm(const std::string& filepath)
+std::pair<int, DirBlock> FS::FindRm(const std::string& filepath)
 {
-    //for each entry in directory
-    for(int i = 0; i < 64; ++i)
+    //begin by loading the next last directory
+    std::pair<DirBlock, std::string> dir = GetDir(filepath);
+
+    //check if we could do something
+
+    if(dir.first.blockNo != -1)
     {
-        if(currentDir.entries[i].access_rights != 0)
+        for(int i = 0; i < 64; ++i)
         {
-            if(strcmp(filepath.c_str(), currentDir.entries[i].file_name) == 0)
+            if(dir.first.entries[i].access_rights != 0)
             {
-                return std::make_pair(i, currentDir.entries[i].type);
+                if(strcmp(dir.second.c_str(), dir.first.entries[i].file_name) == 0)
+                {
+                    return std::make_pair(i, dir.first);
+                }
             }
         }
     }
 
-    return std::make_pair(-1, -1);
+    return std::make_pair(-1, dir.first);
 }
 
 std::pair<DirBlock, std::string> FS::GetDir(const std::string& path)
 {
     DirBlock dir = currentDir;
 
+    int start = 0;
+    int end = path.find('/');
+
     if(path[0] == '/')
     {
         disk.read(0, (uint8_t*)dir.entries);
         dir.blockNo = 0;
         dir.access_right = 6;
-    }
 
-    int start = 0;
-    int end = path.find('/');
+        start = 1;
+        end = path.find('/', 1);
+    }
 
     while(end != std::string::npos)
     {
         //we will see if we can find the directory
-        int index = FindDirectory(path.substr(start, end - start));
+        int index = FindDirectory(path.substr(start, end - start), dir);
 
         if(index == -1)
         {
             dir.blockNo = -1;
             std::cout << "Couldn't find the directory" << std::endl;
+            return std::make_pair(dir, path);
+        }
+
+        if(dir.entries[index].access_rights < 4)
+        {
+            dir.blockNo = -1;
+            std::cout << "Missing permission" << std::endl;
             return std::make_pair(dir, path);
         }
 
