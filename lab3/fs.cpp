@@ -14,8 +14,6 @@
 std::string currDirStr = "/";
 DirBlock currentDir;
 
-//when we change directory we will add to this otherwise we can save a name in the dirblock
-
 FS::FS()
 {
     std::cout << "FS::FS()... Creating file system\n";
@@ -30,8 +28,8 @@ FS::~FS()
 int
 FS::format()
 {
-    Datablock buffer;
     //create a datablock and fill with zero
+    Datablock buffer;
     std::fill(std::begin(buffer), std::end(buffer), 0);
 
     //We will overwrite the whole disk with this block to reset anything that is left
@@ -72,7 +70,6 @@ FS::create(const std::string& filepath)
 
     //std::pair<DirBlock*, std::string> dirPair = GetDir(filepath);
     std::pair<DirBlock, std::string> dirPair = GetDir(filepath);
-
 
     if(dirPair.first.blockNo == -1)
     {
@@ -550,7 +547,6 @@ int
 FS::rm(const std::string& filepath)
 {
     int block = currentDir.blockNo;
-
     int access = currentDir.access_right;
 
     //we will first test if a file exists with this filename
@@ -709,7 +705,6 @@ FS::append(const std::string& filepath1, const std::string& filepath2)
                 size -= 1024;
             }
 
-
             for (int i = 0; i < rangeVal; ++i)
             {
                 if(filePos == 1024)
@@ -738,7 +733,6 @@ FS::append(const std::string& filepath1, const std::string& filepath2)
     }
 
     disk.read(0, (uint8_t*)currentDir.entries);
-
     return 0;
 }
 
@@ -857,7 +851,6 @@ FS::cd(const std::string& dirpath)
     }
 
     // we now have to find the last directory
-
     int index = FindDirectory(nDir.second, nDir.first);
 
     if(index == -1)
@@ -1104,8 +1097,7 @@ std::pair<int, DirBlock> FS::FindRm(const std::string& filepath)
     //begin by loading the next last directory
     std::pair<DirBlock, std::string> dir = GetDir(filepath);
 
-    //check if we could do something
-
+    //find last directory
     if(dir.first.blockNo != -1)
     {
         for(int i = 0; i < 64; ++i)
