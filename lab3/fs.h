@@ -105,6 +105,7 @@ private:
     std::pair<DirBlock, std::string> GetDir(const std::string& path);
 
     std::pair<int, DirBlock> FindRm(const std::string& filepath);
+    std::pair<DirBlock, std::string> CdHelper(const std::string& path);
 };
 
 #endif // __FS_H__

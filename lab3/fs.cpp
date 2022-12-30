@@ -10,8 +10,6 @@
 // -4. file already exists
 
 //TODO:
-// mv and cp should be able to work with a directory
-
 
 std::string currDirStr = "/";
 DirBlock currentDir;
@@ -122,7 +120,7 @@ FS::create(const std::string& filepath)
     std::copy(std::begin(dirPair.second), std::end(dirPair.second), file.dirEntry.file_name);
     if(dirPair.second.size() < 55)
         file.dirEntry.file_name[dirPair.second.size()] = '\0';
-    file.dirEntry.access_rights = 7;
+    file.dirEntry.access_rights = 6;
 
     std::fill(std::begin(file.buffer), std::end(file.buffer), 0);
 
@@ -344,13 +342,25 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
     //load destDir
     std::pair<DirBlock, std::string> destDir = GetDir(destpath);
 
-    // check if it exists
+    // check if
     if(destDir.first.blockNo == -1)
     {
+        std::cout << "couldnt find this directory" << std::endl;
         return -1;
     }
 
-    //check if it is a directory or a file.
+    //check if it is a directory
+    int tempIndex = FindDirectory(destDir.second, destDir.first);
+
+    if(tempIndex != -1)
+    {
+        //load that directory
+        destDir.first.blockNo = destDir.first.entries[tempIndex].first_blk;
+        destDir.first.access_right = destDir.first.entries[tempIndex].access_rights;
+        disk.read(destDir.first.blockNo, (uint8_t*)destDir.first.entries);
+        //and find the prior name
+        destDir.second = sourceDir.second;
+    }
 
     //check that the file doesn't exist
     if(!CheckFileCreation(destDir.second, destDir.first))
@@ -826,6 +836,65 @@ FS::mkdir(const std::string& dirpath)
 int
 FS::cd(const std::string& dirpath)
 {
+    if(dirpath == "/")
+    {
+        disk.read(0, (uint8_t*)currentDir.entries);
+        currentDir.blockNo = 0;
+        currentDir.access_right = 6;
+
+        currDirStr = "/";
+
+        return 0;
+    }
+
+    std::pair<DirBlock, std::string> nDir = CdHelper(dirpath);
+
+    //if we cant find it return -1
+    if(nDir.first.blockNo == -1)
+    {
+        std::cout << "couldn't find this directory" << std::endl;
+        return -1;
+    }
+
+    // we now have to find the last directory
+
+    int index = FindDirectory(nDir.second, nDir.first);
+
+    if(index == -1)
+    {
+        std::cout << "couldnt find this directory" << std::endl;
+        return -1;
+    }
+
+    if(nDir.first.entries[index].access_rights < 4)
+    {
+        std::cout << "not suffienct access rights" << std::endl;
+        return -3;
+    }
+
+    currentDir.access_right = nDir.first.entries[index].access_rights;
+    currentDir.blockNo = nDir.first.entries[index].first_blk;
+
+    if(strcmp(nDir.first.entries[index].file_name, "..") == 0)
+    {
+        currDirStr = currDirStr.substr(0, currDirStr.find_last_of('/'));
+
+        //fix when we cd from one directory to root
+        if (currDirStr.empty())
+            currDirStr = '/';
+    }
+    else
+    {
+        if(currDirStr[currDirStr.size()-1] != '/')
+            currDirStr += '/';
+
+        currDirStr += nDir.first.entries[index].file_name;
+    }
+
+    //otherwise load
+    disk.read(nDir.first.entries[index].first_blk, (uint8_t*)currentDir.entries);
+
+    /*
     std::pair<DirBlock, std::string> nDir = GetDir(dirpath);
 
     //if we cant find it return -1
@@ -857,15 +926,16 @@ FS::cd(const std::string& dirpath)
     //otherwise load
     disk.read(nDir.first.entries[index].first_blk, (uint8_t*)currentDir.entries);
 
-    if(dirpath[0] == '/')
-    {
-        currDirStr = dirpath;
-        return 0;
-    }
-
-    //first perfom .. if any
     int start = 0;
     int end = dirpath.find('/');
+
+    if(dirpath[0] == '/')
+    {
+        currDirStr = '/';
+
+        start = 1;
+        end = dirpath.find('/', 1);
+    }
 
     if(end == std::string::npos)
     {
@@ -901,7 +971,7 @@ FS::cd(const std::string& dirpath)
     }
 
     currDirStr += dirpath.substr(start, std::string::npos);
-
+    */
     return 0;
 }
 
@@ -1099,6 +1169,75 @@ std::pair<DirBlock, std::string> FS::GetDir(const std::string& path)
         end = path.find('/', start);
     }
 
+    return std::make_pair(dir, path.substr(start, end));
+}
+
+std::pair<DirBlock, std::string> FS::CdHelper(const std::string& path)
+{
+    DirBlock dir = currentDir;
+
+    int start = 0;
+    int end = path.find('/');
+
+    std::string temp = currDirStr;
+
+    if(path[0] == '/')
+    {
+        disk.read(0, (uint8_t*)dir.entries);
+        dir.blockNo = 0;
+        dir.access_right = 6;
+
+        temp = "/";
+
+        start = 1;
+        end = path.find('/', 1);
+    }
+
+    while(end != std::string::npos)
+    {
+        //we will see if we can find the directory
+        int index = FindDirectory(path.substr(start, end - start), dir);
+
+        if(index == -1)
+        {
+            dir.blockNo = -1;
+            std::cout << "Couldn't find the directory" << std::endl;
+            return std::make_pair(dir, path);
+        }
+
+        if(dir.entries[index].access_rights < 4)
+        {
+            dir.blockNo = -1;
+            std::cout << "Missing permission" << std::endl;
+            return std::make_pair(dir, path);
+        }
+
+        uint16_t blck = dir.entries[index].first_blk;
+        dir.blockNo = blck;
+        dir.access_right = dir.entries[index].access_rights;
+
+        if(strcmp(dir.entries[index].file_name, "..") == 0)
+        {
+            temp = temp.substr(0, temp.find_last_of('/'));
+
+            //fix when we cd from one directory to root
+            if (temp.empty())
+                temp = '/';
+        }
+        else
+        {
+            if(temp[temp.size()-1] != '/')
+                temp += "/";
+
+            temp += dir.entries[index].file_name;
+        }
+        disk.read(blck, (uint8_t*)dir.entries);
+
+        start = end + 1;
+        end = path.find('/', start);
+    }
+
+    currDirStr = temp;
     return std::make_pair(dir, path.substr(start, end));
 }
 ;;
