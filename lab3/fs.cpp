@@ -350,6 +350,15 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
     //check if it is a directory
     int tempIndex = FindDirectory(destDir.second, destDir.first);
 
+    // we want to mv to root dir
+    if(destDir.second.empty())
+    {
+        destDir.first.access_right = 6;
+        disk.read(0, (uint8_t*)destDir.first.entries);
+        destDir.first.blockNo = 0;
+        destDir.second = sourceDir.second;
+    }
+
     if(tempIndex != -1)
     {
         //load that directory
@@ -484,8 +493,6 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
     sourceDir.first.entries[readPos].access_rights = 0;
     disk.write(sourceDir.first.blockNo, (uint8_t*)sourceDir.first.entries);
 
-    //disk.read(block, (uint8_t*)currentDir.entries);
-
     std::pair<DirBlock, std::string> destDir = GetDir(destpath);
 
     //Check if the last entry is a directory, in other words that we want to mv to a directory and not rename
@@ -497,7 +504,6 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
     {
         destDir.first.access_right = 6;
         disk.read(0, (uint8_t*)destDir.first.entries);
-
         destDir.second = sourceDir.second;
     }
 
@@ -506,7 +512,6 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
     {
         destDir.first.access_right = destDir.first.entries[dirIndex].access_rights;
         temp = destDir.first.entries[dirIndex].first_blk;
-        destDir.first.access_right = destDir.first.entries[dirIndex].access_rights;
         disk.read(temp, (uint8_t*)destDir.first.entries);
 
         destDir.second = sourceDir.second;
