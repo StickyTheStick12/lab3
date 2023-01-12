@@ -1,6 +1,3 @@
-#include <iostream>
-#include <iomanip>
-#include <cstring>
 #include "fs.h"
 
 //error list
@@ -10,7 +7,6 @@
 // -4. file already exists
 
 //TODO:
-// cp may not work with path
 
 std::string currDirStr = "/";
 DirBlock currentDir;
@@ -35,14 +31,14 @@ FS::format()
 
     //We will overwrite the whole disk with this block to reset anything that is left
     for(int i = 0; i < 2048; ++i)
-        disk.write(i, (uint8_t*)&buffer);
+        disk.write(i, (uint8_t*)buffer);
 
     //create a new rootDir
     DirBlock rootDir;
     InitDir(rootDir);
 
     //write rootDir to disk
-    disk.write(0, (uint8_t*)&rootDir.entries);
+    disk.write(0, (uint8_t*)rootDir.entries);
 
     //save rootDir as our current dir
     currentDir = rootDir;
@@ -147,7 +143,7 @@ FS::create(const std::string& filepath)
             if(file.pos == 1024)
             {
                 //write to disk
-                disk.write(writePos, (uint8_t*)&file.buffer);
+                disk.write(writePos, (uint8_t*)file.buffer);
 
                 int indexNextBlock = GetUnusedBlock();
                 FAT[writePos] = indexNextBlock;
@@ -157,8 +153,7 @@ FS::create(const std::string& filepath)
                 writePos = indexNextBlock;
             }
 
-            file.buffer[file.pos] = str[i];
-            file.pos++;
+            file.buffer[file.pos++] = str[i];
             file.dirEntry.size += sizeof(char);
         }
     }
@@ -198,7 +193,7 @@ FS::cat(const std::string& filepath)
     }
 
     //check that file actually exists
-    int fileIndex = FindFile(filepath, dirPair.first);
+    int fileIndex = FindFile(dirPair.second, dirPair.first);
 
     if(fileIndex == -1)
     {
@@ -377,7 +372,7 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
     }
 
     //check for write permission in that folder
-    if(!(currentDir.access_right > 1 && currentDir.access_right != 5 && currentDir.access_right != 4))
+    if(!(destDir.first.access_right > 1 && destDir.first.access_right != 5 && destDir.first.access_right != 4))
     {
         std::cout << "missing permission for writing in this folder" << std::endl;
         return -3;
@@ -393,7 +388,7 @@ FS::cp(const std::string& sourcepath, const std::string& destpath)
     }
 
     // see if we can add it to the directory
-    int dirIndex = FindFreeDirPlace(currentDir);
+    int dirIndex = FindFreeDirPlace(destDir.first);
 
     if(dirIndex == -1)
     {
@@ -490,8 +485,9 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
     }
 
     dir_entry fileDir = sourceDir.first.entries[readPos];
-    sourceDir.first.entries[readPos].access_rights = 0;
-    disk.write(sourceDir.first.blockNo, (uint8_t*)sourceDir.first.entries);
+    //sourceDir.first.entries[readPos].access_rights = 0;
+    //disk.write(sourceDir.first.blockNo, (uint8_t*)sourceDir.first.entries);
+    //disk.read(block, (uint8_t*)currentDir.entries);
 
     std::pair<DirBlock, std::string> destDir = GetDir(destpath);
 
@@ -554,6 +550,8 @@ FS::mv(const std::string& sourcepath, const std::string& destpath)
 
         return -4;
     }
+
+    rm(sourcepath);
 
     return 0;
 }
@@ -1029,7 +1027,7 @@ int FS::GetUnusedBlock()
 
 void FS::SaveFat()
 {
-    disk.write(1, (uint8_t*)&FAT);
+    disk.write(1, (uint8_t*)FAT);
 }
 
 int FS::FindFreeDirPlace(DirBlock& dir)
@@ -1116,7 +1114,7 @@ std::pair<int, DirBlock> FS::FindRm(const std::string& filepath)
     //find last directory
     if(dir.first.blockNo != -1)
     {
-        for(int i = 0; i < 64; ++i)
+        for(int i = (currDirStr != "/"); i < 64; ++i)
         {
             if(dir.first.entries[i].access_rights != 0)
             {
@@ -1225,8 +1223,7 @@ std::pair<DirBlock, std::string> FS::CdHelper(const std::string& path)
             return std::make_pair(dir, path);
         }
 
-        uint16_t blck = dir.entries[index].first_blk;
-        dir.blockNo = blck;
+        dir.blockNo = dir.entries[index].first_blk;
         dir.access_right = dir.entries[index].access_rights;
 
         if(strcmp(dir.entries[index].file_name, "..") == 0)
@@ -1244,7 +1241,7 @@ std::pair<DirBlock, std::string> FS::CdHelper(const std::string& path)
 
             temp += dir.entries[index].file_name;
         }
-        disk.read(blck, (uint8_t*)dir.entries);
+        disk.read(dir.blockNo, (uint8_t*)dir.entries);
 
         start = end + 1;
         end = path.find('/', start);

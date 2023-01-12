@@ -1,5 +1,7 @@
 #include <iostream>
 #include <cstdint>
+#include <iomanip>
+#include <cstring>
 #include "disk.h"
 
 #ifndef __FS_H__
@@ -18,8 +20,8 @@
 
 typedef char Datablock[4096];
 
-//TODO: OBS!!!!!!!! we can change uint8t to a signed integer and thus store -1 as the access right if we want to remove  this because ze
-// zero can be allowed if we doesnt have access at all.
+//TODO: Change access rights to a signed integer to be able to store -1.
+// This will solve the problem if we dont have access to this object
 
 struct dir_entry{
     char file_name[56]; // name of the file / sub-directory
